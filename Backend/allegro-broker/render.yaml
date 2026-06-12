@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: snapbuy-allegro-broker
+    runtime: node
+    plan: free
+    rootDir: Backend/allegro-broker
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: APP_CALLBACK_URL
+        value: invoiceflow://allegro/connected
+      - key: ALLEGRO_ENV
+        value: production
+      - key: ALLEGRO_CLIENT_ID
+        sync: false
+      - key: ALLEGRO_CLIENT_SECRET
+        sync: false
