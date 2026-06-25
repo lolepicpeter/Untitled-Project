@@ -360,15 +360,26 @@ private struct MobileInvoicesView: View {
     }
 
     private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
-        for client in clients {
-            if !clientStore.clients.contains(where: { existingClient in
-                !client.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(client.email) == .orderedSame
+        var invoicesToSave = invoices
+
+        for (index, importedClient) in clients.enumerated() {
+            var savedClient = importedClient
+            if let existingIndex = clientStore.clients.firstIndex(where: { existingClient in
+                !importedClient.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(importedClient.email) == .orderedSame
             }) {
-                clientStore.save(client)
+                savedClient = clientStore.clients[existingIndex]
+                savedClient.fillMissingDetails(from: importedClient)
+            }
+            clientStore.save(savedClient)
+
+            if invoicesToSave.indices.contains(index) {
+                invoicesToSave[index].clientID = savedClient.id
+                invoicesToSave[index].clientName = savedClient.displayName
+                invoicesToSave[index].clientEmail = savedClient.email
             }
         }
 
-        for invoice in invoices {
+        for invoice in invoicesToSave {
             store.save(invoice)
         }
     }
@@ -900,15 +911,26 @@ private struct MacInvoicesView: View {
     }
 
     private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
-        for client in clients {
-            if !clientStore.clients.contains(where: { existingClient in
-                !client.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(client.email) == .orderedSame
+        var invoicesToSave = invoices
+
+        for (index, importedClient) in clients.enumerated() {
+            var savedClient = importedClient
+            if let existingIndex = clientStore.clients.firstIndex(where: { existingClient in
+                !importedClient.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(importedClient.email) == .orderedSame
             }) {
-                clientStore.save(client)
+                savedClient = clientStore.clients[existingIndex]
+                savedClient.fillMissingDetails(from: importedClient)
+            }
+            clientStore.save(savedClient)
+
+            if invoicesToSave.indices.contains(index) {
+                invoicesToSave[index].clientID = savedClient.id
+                invoicesToSave[index].clientName = savedClient.displayName
+                invoicesToSave[index].clientEmail = savedClient.email
             }
         }
 
-        for invoice in invoices {
+        for invoice in invoicesToSave {
             store.save(invoice)
             selectedInvoiceIDs.insert(invoice.id)
             selectionAnchorInvoiceID = invoice.id

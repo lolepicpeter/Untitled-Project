@@ -93,7 +93,7 @@ struct AllegroCheckoutForm: Decodable, Identifiable, Equatable {
 }
 
 struct AllegroBuyer: Decodable, Equatable {
-    static let empty = AllegroBuyer(id: "", email: "", login: "", firstName: "", lastName: "", companyName: "", phoneNumber: "")
+    static let empty = AllegroBuyer(id: "", email: "", login: "", firstName: "", lastName: "", companyName: "", phoneNumber: "", address: nil)
 
     let id: String
     let email: String
@@ -102,6 +102,7 @@ struct AllegroBuyer: Decodable, Equatable {
     let lastName: String
     let companyName: String
     let phoneNumber: String
+    let address: AllegroAddress?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -111,9 +112,10 @@ struct AllegroBuyer: Decodable, Equatable {
         case lastName
         case companyName
         case phoneNumber
+        case address
     }
 
-    init(id: String, email: String, login: String, firstName: String, lastName: String, companyName: String, phoneNumber: String) {
+    init(id: String, email: String, login: String, firstName: String, lastName: String, companyName: String, phoneNumber: String, address: AllegroAddress?) {
         self.id = id
         self.email = email
         self.login = login
@@ -121,6 +123,7 @@ struct AllegroBuyer: Decodable, Equatable {
         self.lastName = lastName
         self.companyName = companyName
         self.phoneNumber = phoneNumber
+        self.address = address
     }
 
     init(from decoder: Decoder) throws {
@@ -132,6 +135,7 @@ struct AllegroBuyer: Decodable, Equatable {
         lastName = try container.decodeIfPresent(String.self, forKey: .lastName) ?? ""
         companyName = try container.decodeIfPresent(String.self, forKey: .companyName) ?? ""
         phoneNumber = try container.decodeIfPresent(String.self, forKey: .phoneNumber) ?? ""
+        address = try? container.decodeIfPresent(AllegroAddress.self, forKey: .address)
     }
 
     var displayName: String {

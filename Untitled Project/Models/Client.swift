@@ -74,4 +74,22 @@ struct Client: Identifiable, Codable, Equatable {
         taxId = company.taxId
         vatId = company.vatId
     }
+
+    mutating func fillMissingDetails(from importedClient: Client) {
+        if countryCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { countryCode = importedClient.countryCode }
+        if companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { companyName = importedClient.companyName }
+        if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { email = importedClient.email }
+        if street.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { street = importedClient.street }
+        if city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { city = importedClient.city }
+        if postalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { postalCode = importedClient.postalCode }
+        if registrationNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { registrationNumber = importedClient.registrationNumber }
+        if taxId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { taxId = importedClient.taxId }
+        if vatId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { vatId = importedClient.vatId }
+        if contactPerson.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { contactPerson = importedClient.contactPerson }
+        if phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { phone = importedClient.phone }
+        if mobile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { mobile = importedClient.mobile }
+        if shippingStreet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingStreet = importedClient.shippingStreet }
+        if shippingCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingCity = importedClient.shippingCity }
+        if shippingPostalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingPostalCode = importedClient.shippingPostalCode }
+    }
 }

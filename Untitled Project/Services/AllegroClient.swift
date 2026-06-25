@@ -186,7 +186,7 @@ enum AllegroInvoiceMapper {
         importedAt: Date = Date()
     ) -> Invoice {
         let issueDate = order.payment?.finishedAt ?? order.updatedAt ?? importedAt
-        let invoiceAddress = order.invoice?.address ?? order.delivery?.address
+        let invoiceAddress = billingAddress(from: order)
         let clientName = resolvedClientName(order: order, address: invoiceAddress)
         let currencyCode = resolvedCurrency(order: order, defaults: defaults)
         let vatRate = defaults.vatRate
@@ -235,7 +235,7 @@ enum AllegroInvoiceMapper {
     }
 
     static func makeClient(from order: AllegroCheckoutForm) -> Client {
-        let address = order.invoice?.address ?? order.delivery?.address
+        let address = billingAddress(from: order)
         var client = Client.empty
         client.countryCode = address?.countryCode.isEmpty == false ? address?.countryCode ?? client.countryCode : client.countryCode
         client.companyName = resolvedClientName(order: order, address: address)
@@ -245,7 +245,10 @@ enum AllegroInvoiceMapper {
         client.postalCode = address?.postCode ?? ""
         client.taxId = address?.taxID ?? ""
         client.vatId = address?.taxID ?? ""
-        client.phone = address?.phoneNumber ?? order.buyer.phoneNumber
+        client.phone = nonEmpty(address?.phoneNumber) ?? order.buyer.phoneNumber
+        client.shippingStreet = order.delivery?.address?.street ?? ""
+        client.shippingCity = order.delivery?.address?.city ?? ""
+        client.shippingPostalCode = order.delivery?.address?.postCode ?? ""
         return client
     }
 
@@ -281,6 +284,15 @@ enum AllegroInvoiceMapper {
         }
 
         return items.isEmpty ? [.empty(vatRate: fallbackVATRate)] : items
+    }
+
+    private static func billingAddress(from order: AllegroCheckoutForm) -> AllegroAddress? {
+        order.invoice?.address ?? order.delivery?.address ?? order.buyer.address
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     private static func resolvedClientName(order: AllegroCheckoutForm, address: AllegroAddress?) -> String {
