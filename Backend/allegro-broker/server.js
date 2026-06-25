@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
+import pg from "pg";
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,7 @@ const appCallbackURL = process.env.APP_CALLBACK_URL || "invoiceflow://allegro/co
 const clientID = requiredEnv("ALLEGRO_CLIENT_ID");
 const clientSecret = requiredEnv("ALLEGRO_CLIENT_SECRET");
 const environment = process.env.ALLEGRO_ENV === "sandbox" ? "sandbox" : "production";
+const databaseURL = process.env.DATABASE_URL?.trim();
 
 const allegroAuthBaseURL = environment === "sandbox"
   ? "https://allegro.pl.allegrosandbox.pl"
@@ -21,6 +23,10 @@ const allegroAPIBaseURL = environment === "sandbox"
 
 const pendingStates = new Map();
 const connections = new Map();
+const pool = databaseURL ? new pg.Pool({
+  connectionString: databaseURL,
+  ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false }
+}) : undefined;
 
 const scopes = [
   "allegro:api:orders:read",
@@ -28,7 +34,12 @@ const scopes = [
 ];
 
 app.get("/health", (request, response) => {
-  response.json({ ok: true, service: "invoiceflow-allegro-broker", environment });
+  response.json({
+    ok: true,
+    service: "invoiceflow-allegro-broker",
+    environment,
+    storage: pool ? "postgres" : "memory"
+  });
 });
 
 app.get("/allegro/oauth/start", (request, response) => {
@@ -75,7 +86,7 @@ app.get("/allegro/oauth/callback", async (request, response) => {
   try {
     const token = await exchangeAuthorizationCode(code);
     const connectionID = crypto.randomUUID();
-    connections.set(connectionID, {
+    await saveConnection(connectionID, {
       createdAt: Date.now(),
       token
     });
@@ -88,8 +99,8 @@ app.get("/allegro/oauth/callback", async (request, response) => {
   }
 });
 
-app.get("/allegro/connections/:connectionID", (request, response) => {
-  const connection = connections.get(request.params.connectionID);
+app.get("/allegro/connections/:connectionID", async (request, response) => {
+  const connection = await getConnection(request.params.connectionID);
   if (!connection) {
     response.status(404).json({ error: { message: "Connection not found." } });
     return;
@@ -104,7 +115,7 @@ app.get("/allegro/connections/:connectionID", (request, response) => {
 });
 
 app.get("/allegro/connections/:connectionID/orders", async (request, response) => {
-  const connection = connections.get(request.params.connectionID);
+  const connection = await getConnection(request.params.connectionID);
   if (!connection) {
     response.status(404).json({ error: { message: "Connection not found." } });
     return;
@@ -113,7 +124,8 @@ app.get("/allegro/connections/:connectionID/orders", async (request, response) =
   const limit = clampNumber(Number(request.query.limit || 25), 1, 100);
 
   try {
-    const orders = await recentCheckoutForms(connection.token.access_token, limit);
+    const token = await accessTokenForConnection(request.params.connectionID, connection);
+    const orders = await recentCheckoutForms(token.access_token, limit);
     response.json({ orders });
   } catch (error) {
     response.status(502).json({
@@ -124,10 +136,12 @@ app.get("/allegro/connections/:connectionID/orders", async (request, response) =
   }
 });
 
-app.delete("/allegro/connections/:connectionID", (request, response) => {
-  connections.delete(request.params.connectionID);
+app.delete("/allegro/connections/:connectionID", async (request, response) => {
+  await deleteConnection(request.params.connectionID);
   response.status(204).end();
 });
+
+await initializeStorage();
 
 app.listen(port, () => {
   console.log(`Allegro broker listening on port ${port}`);
@@ -186,6 +200,119 @@ async function exchangeAuthorizationCode(code) {
     savedAt: Date.now(),
     expiresAt: Date.now() + Number(token.expires_in || 0) * 1000
   };
+}
+
+async function refreshAccessToken(refreshToken) {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken
+  });
+
+  const response = await fetch(new URL("/auth/oauth/token", allegroAuthBaseURL), {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${Buffer.from(`${clientID}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json"
+    },
+    body
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Allegro token refresh failed (${response.status}): ${text}`);
+  }
+
+  const token = await response.json();
+  return {
+    ...token,
+    refresh_token: token.refresh_token || refreshToken,
+    savedAt: Date.now(),
+    expiresAt: Date.now() + Number(token.expires_in || 0) * 1000
+  };
+}
+
+async function accessTokenForConnection(connectionID, connection) {
+  if (!isTokenExpiring(connection.token)) {
+    return connection.token;
+  }
+
+  const refreshToken = connection.token.refresh_token;
+  if (typeof refreshToken !== "string" || refreshToken.length === 0) {
+    throw new Error("Allegro connection expired and has no refresh token. Reconnect Allegro.");
+  }
+
+  const refreshedToken = await refreshAccessToken(refreshToken);
+  await saveConnection(connectionID, {
+    ...connection,
+    token: refreshedToken
+  });
+  return refreshedToken;
+}
+
+function isTokenExpiring(token) {
+  const expiresAt = Number(token?.expiresAt || 0);
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60_000;
+}
+
+async function initializeStorage() {
+  if (!pool) {
+    console.warn("DATABASE_URL is not set. Allegro connections will be stored in memory only.");
+    return;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS allegro_connections (
+      id TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL,
+      token JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function getConnection(connectionID) {
+  if (!pool) {
+    return connections.get(connectionID);
+  }
+
+  const result = await pool.query(
+    "SELECT id, created_at, token FROM allegro_connections WHERE id = $1",
+    [connectionID]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return undefined;
+  }
+
+  return {
+    createdAt: new Date(row.created_at).getTime(),
+    token: row.token
+  };
+}
+
+async function saveConnection(connectionID, connection) {
+  if (!pool) {
+    connections.set(connectionID, connection);
+    return;
+  }
+
+  await pool.query(
+    `INSERT INTO allegro_connections (id, created_at, token, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (id)
+     DO UPDATE SET token = EXCLUDED.token, updated_at = NOW()`,
+    [connectionID, new Date(connection.createdAt), connection.token]
+  );
+}
+
+async function deleteConnection(connectionID) {
+  if (!pool) {
+    connections.delete(connectionID);
+    return;
+  }
+
+  await pool.query("DELETE FROM allegro_connections WHERE id = $1", [connectionID]);
 }
 
 async function recentCheckoutForms(accessToken, limit) {

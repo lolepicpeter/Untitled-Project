@@ -48,6 +48,8 @@ npm start
 
 ## Step 3: Add Render Environment Variables
 
+Create a Render Postgres database first. In the database's **Connect** menu, copy the **Internal Database URL** and add it to the web service as `DATABASE_URL`.
+
 Add these in Render Environment settings:
 
 ```text
@@ -56,9 +58,12 @@ APP_CALLBACK_URL=invoiceflow://allegro/connected
 ALLEGRO_ENV=production
 ALLEGRO_CLIENT_ID=your-allegro-client-id
 ALLEGRO_CLIENT_SECRET=your-allegro-client-secret
+DATABASE_URL=your-render-postgres-internal-database-url
 ```
 
 Use your real Allegro Developer Portal values for `ALLEGRO_CLIENT_ID` and `ALLEGRO_CLIENT_SECRET`.
+
+Do not run production users without `DATABASE_URL`. Without Postgres, the broker stores Allegro connections in memory, so Render restarts, redeploys, or service sleep can force users to disconnect and reconnect.
 
 ## Step 4: Add Custom Domain in Render
 
@@ -120,6 +125,14 @@ https://api.snapbuy.sk/health
 ```
 
 It should return JSON.
+
+Confirm the JSON includes:
+
+```json
+{
+  "storage": "postgres"
+}
+```
 
 Then open:
 

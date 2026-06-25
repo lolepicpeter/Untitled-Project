@@ -23,6 +23,7 @@ Required values:
 - `ALLEGRO_CLIENT_ID`: Allegro app client ID
 - `ALLEGRO_CLIENT_SECRET`: Allegro app client secret
 - `ALLEGRO_ENV`: `production` or `sandbox`
+- `DATABASE_URL`: Postgres connection string for persistent Allegro connections
 
 ## Local Run
 
@@ -41,6 +42,8 @@ Use Render first unless you already have another hosting provider. Follow:
 DEPLOY_RENDER.md
 ```
 
-## Development Storage
+## Storage
 
-This scaffold stores pending OAuth states and access tokens in memory. That is enough to validate the flow, but production should move connections and encrypted tokens into a database.
+When `DATABASE_URL` is set, the broker creates an `allegro_connections` table and stores seller Allegro tokens in Postgres. It refreshes expired access tokens before fetching orders.
+
+When `DATABASE_URL` is missing, the broker falls back to in-memory storage. That is only useful for local development because every restart, deploy, or free-hosting sleep clears the connection and forces the seller to reconnect.
