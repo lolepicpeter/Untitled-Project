@@ -79,6 +79,25 @@ struct AllegroBackendConnectionClient {
         }
     }
 
+    func account(connectionID: String) async throws -> AllegroBackendAccount {
+        let url = brokerBaseURL.appending(path: "allegro/connections/\(connectionID)/account")
+        let (data, response) = try await urlSession.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AllegroBackendConnectionError.invalidResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let brokerError = try? JSONDecoder().decode(AllegroBackendErrorResponse.self, from: data)
+            throw AllegroBackendConnectionError.requestFailed(message: brokerError?.error.message)
+        }
+
+        do {
+            return try JSONDecoder().decode(AllegroBackendAccountResponse.self, from: data).account
+        } catch {
+            throw AllegroBackendConnectionError.decodingFailed(Self.describeDecodingError(error, data: data))
+        }
+    }
+
     func disconnect(connectionID: String) async throws {
         var request = URLRequest(url: brokerBaseURL.appending(path: "allegro/connections/\(connectionID)"))
         request.httpMethod = "DELETE"
@@ -110,12 +129,37 @@ struct AllegroBackendOrdersMeta: Decodable, Equatable {
     var to: String?
     var limit: Int?
     var fetched: Int?
+    var totalAvailable: Int?
     var filterMode: String?
+}
+
+struct AllegroBackendAccount: Decodable, Equatable {
+    var id: String?
+    var login: String?
+    var email: String?
+    var firstName: String?
+    var lastName: String?
+    var companyName: String?
+
+    var displayName: String {
+        let personName = [firstName, lastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let candidates: [String?] = [companyName, login, personName, email]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Allegro account"
+    }
 }
 
 private struct AllegroBackendOrdersResponse: Decodable {
     let orders: [AllegroCheckoutForm]
     let meta: AllegroBackendOrdersMeta?
+}
+
+private struct AllegroBackendAccountResponse: Decodable {
+    let account: AllegroBackendAccount
 }
 
 private struct AllegroBackendErrorResponse: Decodable {

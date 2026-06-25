@@ -114,6 +114,26 @@ app.get("/allegro/connections/:connectionID", async (request, response) => {
   });
 });
 
+app.get("/allegro/connections/:connectionID/account", async (request, response) => {
+  const connection = await getConnection(request.params.connectionID);
+  if (!connection) {
+    response.status(404).json({ error: { message: "Connection not found." } });
+    return;
+  }
+
+  try {
+    const token = await accessTokenForConnection(request.params.connectionID, connection);
+    const account = await allegroRequest(new URL("/me", allegroAPIBaseURL), token.access_token);
+    response.json({ account });
+  } catch (error) {
+    response.status(502).json({
+      error: {
+        message: error instanceof Error ? error.message : "Could not fetch Allegro account."
+      }
+    });
+  }
+});
+
 app.get("/allegro/connections/:connectionID/orders", async (request, response) => {
   const connection = await getConnection(request.params.connectionID);
   if (!connection) {
@@ -344,12 +364,13 @@ async function checkoutFormsByDateRange(accessToken, options) {
   const pageSize = 100;
   const limit = clampNumber(Number(options.limit || 500), 1, 1000);
   const orders = [];
+  let totalAvailable;
   let offset = 0;
   let filterMode = "lineItems.boughtAt";
 
   while (orders.length < limit) {
     const requestLimit = Math.min(pageSize, limit - orders.length);
-    const page = await checkoutFormsPage(accessToken, {
+    const pageResult = await checkoutFormsPage(accessToken, {
       from: options.from,
       to: options.to,
       limit: requestLimit,
@@ -370,6 +391,10 @@ async function checkoutFormsByDateRange(accessToken, options) {
       }
       throw error;
     });
+    const page = pageResult.checkoutForms;
+    if (Number.isFinite(pageResult.totalAvailable)) {
+      totalAvailable = pageResult.totalAvailable;
+    }
 
     if (page.length === 0) {
       break;
@@ -389,6 +414,7 @@ async function checkoutFormsByDateRange(accessToken, options) {
       to: options.to,
       limit,
       fetched: orders.length,
+      totalAvailable,
       filterMode
     }
   };
@@ -405,7 +431,10 @@ async function checkoutFormsPage(accessToken, options) {
   checkoutFormsURL.searchParams.set(`${options.filterMode}.lte`, options.to);
 
   const response = await allegroRequest(checkoutFormsURL, accessToken);
-  return Array.isArray(response.checkoutForms) ? response.checkoutForms : [];
+  return {
+    checkoutForms: Array.isArray(response.checkoutForms) ? response.checkoutForms : [],
+    totalAvailable: Number(response.totalCount ?? response.count ?? response.total)
+  };
 }
 
 function isUnsupportedFilterError(error) {
