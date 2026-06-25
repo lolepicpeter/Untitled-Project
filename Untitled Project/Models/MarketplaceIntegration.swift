@@ -6,6 +6,8 @@ struct MarketplaceOrderReference: Codable, Equatable {
     var orderNumber: String
     var importedAt: Date
     var externalStatus: String
+    var sourceAccountID: String? = nil
+    var sourceAccountName: String? = nil
 
     var displayTitle: String {
         let trimmedNumber = orderNumber.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -361,16 +361,21 @@ private struct MobileInvoicesView: View {
 
     private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
         var invoicesToSave = invoices
+        var clientsToSave: [Client] = []
+        var workingClients = clientStore.clients
 
         for (index, importedClient) in clients.enumerated() {
             var savedClient = importedClient
-            if let existingIndex = clientStore.clients.firstIndex(where: { existingClient in
+            if let existingIndex = workingClients.firstIndex(where: { existingClient in
                 !importedClient.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(importedClient.email) == .orderedSame
             }) {
-                savedClient = clientStore.clients[existingIndex]
+                savedClient = workingClients[existingIndex]
                 savedClient.fillMissingDetails(from: importedClient)
+                workingClients[existingIndex] = savedClient
+            } else {
+                workingClients.append(savedClient)
             }
-            clientStore.save(savedClient)
+            clientsToSave.append(savedClient)
 
             if invoicesToSave.indices.contains(index) {
                 invoicesToSave[index].clientID = savedClient.id
@@ -379,9 +384,8 @@ private struct MobileInvoicesView: View {
             }
         }
 
-        for invoice in invoicesToSave {
-            store.save(invoice)
-        }
+        clientStore.saveAll(clientsToSave)
+        store.saveAll(invoicesToSave)
     }
 
     private func canRecordPayment(for invoice: Invoice) -> Bool {
@@ -1728,13 +1732,16 @@ private struct MacInvoicePreviewView: View {
                 .foregroundStyle(.secondary)
             Text(invoice.displayTitle)
                 .font(.title.weight(.bold))
-            if let source = invoice.marketplaceReference?.source {
-                InvoiceSourceBadge(source: source)
+            if let marketplaceReference = invoice.marketplaceReference {
+                InvoiceSourceBadge(reference: marketplaceReference)
             }
             Text(invoice.total.formatted(.currency(code: currencyCode)))
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.green)
             MacInvoiceStatusChip(status: invoice.displayStatus)
+            if invoice.showsPaidDraftBadge {
+                InvoicePaymentStateBadge(title: "Paid")
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(20)
@@ -2760,11 +2767,15 @@ private struct InvoiceRow: View {
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
 
-                    if let source = invoice.marketplaceReference?.source {
-                        InvoiceSourceBadge(source: source)
+                    if let marketplaceReference = invoice.marketplaceReference {
+                        InvoiceSourceBadge(reference: marketplaceReference)
                     }
 
                     InvoiceStatusBadge(status: invoice.displayStatus, isSelected: isSelected)
+
+                    if invoice.showsPaidDraftBadge {
+                        InvoicePaymentStateBadge(title: "Paid", isSelected: isSelected)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -2824,10 +2835,17 @@ private struct InvoiceRow: View {
 }
 
 private struct InvoiceSourceBadge: View {
-    let source: MarketplaceSource
+    let reference: MarketplaceOrderReference
+
+    private var title: String {
+        guard let accountName = reference.sourceAccountName?.trimmingCharacters(in: .whitespacesAndNewlines), !accountName.isEmpty else {
+            return reference.source.title
+        }
+        return "\(reference.source.title) · \(accountName)"
+    }
 
     var body: some View {
-        Label(source.title, systemImage: "shippingbox")
+        Label(title, systemImage: "shippingbox")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.orange)
             .labelStyle(.titleAndIcon)
@@ -2853,6 +2871,30 @@ private struct InvoiceStatusBadge: View {
                 in: Capsule()
             )
             .lineLimit(1)
+    }
+}
+
+private struct InvoicePaymentStateBadge: View {
+    let title: String
+    var isSelected = false
+
+    var body: some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.green)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                Color.green.opacity(isSelected ? 0.18 : 0.13),
+                in: Capsule()
+            )
+            .lineLimit(1)
+    }
+}
+
+private extension Invoice {
+    var showsPaidDraftBadge: Bool {
+        displayStatus == .draft && paidTotal > 0.005 && balanceDue <= 0.005
     }
 }
 
@@ -3040,10 +3082,13 @@ struct MobileInvoiceDetailView: View {
             Text(invoice.total.formatted(.currency(code: currencyCode)))
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.green)
-            if let source = invoice.marketplaceReference?.source {
-                InvoiceSourceBadge(source: source)
+            if let marketplaceReference = invoice.marketplaceReference {
+                InvoiceSourceBadge(reference: marketplaceReference)
             }
             InvoiceStatusBadge(status: invoice.displayStatus)
+            if invoice.showsPaidDraftBadge {
+                InvoicePaymentStateBadge(title: "Paid")
+            }
             if invoice.displayStatus != .draft {
                 VStack(spacing: 6) {
                     ProgressView(value: paymentProgress)

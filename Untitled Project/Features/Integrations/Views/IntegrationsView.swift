@@ -4,7 +4,14 @@ struct IntegrationsView: View {
     @State private var allegroConnector = AllegroOAuthConnector()
 
     private var allegroStatusText: String {
-        allegroConnector.isConnected ? "Connected" : "Connect your seller account and import orders for invoicing."
+        switch allegroConnector.backendConnections.count {
+        case 0:
+            "Add Allegro shops as separate sales channels."
+        case 1:
+            "1 sales channel connected"
+        default:
+            "\(allegroConnector.backendConnections.count) sales channels connected"
+        }
     }
 
     private var allegroStatusColor: Color {
@@ -22,7 +29,7 @@ struct IntegrationsView: View {
                             allegroIcon
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Allegro")
+                                Text("Allegro Sales Channels")
                                     .font(.headline)
                                 Text(allegroStatusText)
                                     .font(.subheadline)
@@ -32,7 +39,7 @@ struct IntegrationsView: View {
                         .padding(.vertical, 6)
                     }
                 } header: {
-                    Text("Marketplaces")
+                    Text("Sales Channels")
                 }
             }
             .navigationTitle("Integrations")

@@ -84,16 +84,20 @@ final class AllegroOAuthConnector: NSObject {
     var settings: AllegroConnectionSettings
     var token: AllegroOAuthToken?
     var backendConnection: AllegroBackendConnection?
+    var backendConnections: [AllegroBackendConnection] = []
+    var backendAccount: AllegroBackendAccount?
     var statusMessage: StatusMessage?
     var isConnecting = false
 
     @ObservationIgnored private let tokenStore = AllegroOAuthTokenStore()
     @ObservationIgnored private let backendConnectionStore = AllegroBackendConnectionStore()
     @ObservationIgnored private var webAuthenticationSession: ASWebAuthenticationSession?
+    @ObservationIgnored private var usesEphemeralWebAuthenticationSession = false
 
     override init() {
         settings = AllegroConnectionSettings.load()
         token = try? tokenStore.load()
+        backendConnections = backendConnectionStore.loadAll()
         backendConnection = backendConnectionStore.load()
         super.init()
         if isConnected, settings.connectedAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -121,12 +125,43 @@ final class AllegroOAuthConnector: NSObject {
     func reload() {
         settings = AllegroConnectionSettings.load()
         token = try? tokenStore.load()
+        backendConnections = backendConnectionStore.loadAll()
         backendConnection = backendConnectionStore.load()
     }
 
     func saveSettings(_ newSettings: AllegroConnectionSettings) {
         settings = newSettings
         settings.save()
+    }
+
+    func refreshBackendAccount() async {
+        guard let backendConnection else {
+            backendAccount = nil
+            return
+        }
+        await refreshBackendAccount(for: backendConnection)
+    }
+
+    func refreshBackendAccount(for connection: AllegroBackendConnection) async {
+        guard let client = AllegroBackendConnectionClient(brokerBaseURL: connection.brokerBaseURL) else {
+            backendAccount = nil
+            return
+        }
+
+        do {
+            let account = try await client.account(connectionID: connection.connectionID)
+            let enrichedConnection = connection.enriched(with: account)
+            backendConnectionStore.save(enrichedConnection)
+            backendConnections = backendConnectionStore.loadAll()
+            if backendConnection?.connectionID == connection.connectionID {
+                backendConnection = enrichedConnection
+                backendAccount = account
+                settings.connectedAccountName = account.displayName
+                settings.save()
+            }
+        } catch {
+            statusMessage = StatusMessage(error: error)
+        }
     }
 
     func connect() async {
@@ -177,26 +212,96 @@ final class AllegroOAuthConnector: NSObject {
         }
     }
 
+    func connectAnotherShop() async {
+        let previousEphemeralSetting = usesEphemeralWebAuthenticationSession
+        usesEphemeralWebAuthenticationSession = true
+        defer { usesEphemeralWebAuthenticationSession = previousEphemeralSetting }
+
+        await connect()
+        await refreshBackendAccount()
+    }
+
+    func switchAccount() async {
+        let previousEphemeralSetting = usesEphemeralWebAuthenticationSession
+        usesEphemeralWebAuthenticationSession = true
+        defer { usesEphemeralWebAuthenticationSession = previousEphemeralSetting }
+
+        if let backendConnection {
+            await disconnect(connection: backendConnection)
+        } else {
+            await disconnectAsync()
+        }
+        await connect()
+        await refreshBackendAccount()
+    }
+
     func disconnect() {
         Task { await disconnectAsync() }
     }
 
     func disconnectAsync() async {
-        do {
-            if let backendConnection,
-               let client = AllegroBackendConnectionClient(brokerBaseURL: backendConnection.brokerBaseURL) {
-                try await client.disconnect(connectionID: backendConnection.connectionID)
-            }
+        guard let backendConnection else {
             backendConnectionStore.delete()
-            backendConnection = nil
-            try tokenStore.delete()
+            backendConnections = []
+            backendAccount = nil
+            try? tokenStore.delete()
             token = nil
             settings.connectedAccountName = ""
+            settings.save()
+            statusMessage = StatusMessage(text: "Allegro disconnected.", systemImage: "xmark.circle", color: .secondary)
+            return
+        }
+        await disconnect(connection: backendConnection)
+    }
+
+    func disconnectAllConnections() async {
+        for connection in backendConnectionStore.loadAll() {
+            if let client = AllegroBackendConnectionClient(brokerBaseURL: connection.brokerBaseURL) {
+                try? await client.disconnect(connectionID: connection.connectionID)
+            }
+        }
+        backendConnectionStore.delete()
+        backendConnections = []
+        backendConnection = nil
+        backendAccount = nil
+        try? tokenStore.delete()
+        token = nil
+        settings.connectedAccountName = ""
+        settings.save()
+        statusMessage = StatusMessage(text: "Allegro disconnected.", systemImage: "xmark.circle", color: .secondary)
+    }
+
+    func disconnect(connection: AllegroBackendConnection) async {
+        do {
+            if let client = AllegroBackendConnectionClient(brokerBaseURL: connection.brokerBaseURL) {
+                try await client.disconnect(connectionID: connection.connectionID)
+            }
+            backendConnectionStore.delete(connection)
+            backendConnections = backendConnectionStore.loadAll()
+            backendConnection = backendConnectionStore.load()
+            if backendConnection == nil {
+                try? tokenStore.delete()
+                token = nil
+                backendAccount = nil
+                settings.connectedAccountName = ""
+            } else {
+                backendAccount = nil
+                settings.connectedAccountName = backendConnection?.displayName ?? ""
+            }
             settings.save()
             statusMessage = StatusMessage(text: "Allegro disconnected.", systemImage: "xmark.circle", color: .secondary)
         } catch {
             statusMessage = StatusMessage(error: error)
         }
+    }
+
+    func activate(connection: AllegroBackendConnection) {
+        backendConnectionStore.activate(connection)
+        backendConnection = connection
+        backendConnections = backendConnectionStore.loadAll()
+        backendAccount = nil
+        settings.connectedAccountName = connection.displayName
+        settings.save()
     }
 
     private func connectThroughBroker() async throws {
@@ -215,6 +320,7 @@ final class AllegroOAuthConnector: NSObject {
         backendConnection = connection
         settings.connectedAccountName = connection.displayName
         settings.save()
+        await refreshBackendAccount()
         statusMessage = StatusMessage(text: "Allegro connected through broker.", systemImage: "checkmark.circle", color: .green)
     }
 
@@ -250,7 +356,7 @@ final class AllegroOAuthConnector: NSObject {
                 continuation.resume(returning: callbackURL)
             }
             session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
+            session.prefersEphemeralWebBrowserSession = usesEphemeralWebAuthenticationSession
             webAuthenticationSession = session
 
             if !session.start() {

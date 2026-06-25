@@ -1,17 +1,46 @@
 import Foundation
 
-struct AllegroBackendConnection: Codable, Equatable {
+struct AllegroBackendConnection: Codable, Equatable, Identifiable {
     var connectionID: String
     var brokerBaseURL: String
     var connectedAt: Date
+    var accountID: String? = nil
+    var login: String? = nil
+    var accountDisplayName: String? = nil
+    var companyName: String? = nil
+    var companyTaxID: String? = nil
+
+    var id: String { connectionID }
 
     var displayName: String {
-        "Allegro account"
+        [accountDisplayName, login]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Allegro account"
+    }
+
+    var shopName: String {
+        login?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? displayName
+    }
+
+    var legalSellerName: String {
+        companyName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Seller details unavailable"
+    }
+
+    func enriched(with account: AllegroBackendAccount) -> AllegroBackendConnection {
+        var connection = self
+        connection.accountID = account.id
+        connection.login = account.login
+        connection.accountDisplayName = account.displayName
+        connection.companyName = account.companyName
+        connection.companyTaxID = account.companyTaxID
+        return connection
     }
 }
 
 struct AllegroBackendConnectionStore {
     private static let storageKey = "allegroBackendConnection"
+    private static let storageListKey = "allegroBackendConnections"
+    private static let activeConnectionIDKey = "allegroBackendConnection.activeID"
     private let userDefaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {
@@ -19,17 +48,78 @@ struct AllegroBackendConnectionStore {
     }
 
     func load() -> AllegroBackendConnection? {
-        guard let data = userDefaults.data(forKey: Self.storageKey) else { return nil }
-        return try? JSONDecoder().decode(AllegroBackendConnection.self, from: data)
+        if let activeID = userDefaults.string(forKey: Self.activeConnectionIDKey),
+           let connection = loadAll().first(where: { $0.connectionID == activeID }) {
+            return connection
+        }
+        return loadAll().first
+    }
+
+    func loadAll() -> [AllegroBackendConnection] {
+        let decoder = JSONDecoder()
+        if let data = userDefaults.data(forKey: Self.storageListKey),
+           let connections = try? decoder.decode([AllegroBackendConnection].self, from: data) {
+            return connections.sorted { $0.connectedAt > $1.connectedAt }
+        }
+
+        guard let data = userDefaults.data(forKey: Self.storageKey),
+              let connection = try? decoder.decode(AllegroBackendConnection.self, from: data) else {
+            return []
+        }
+        saveAll([connection])
+        userDefaults.set(connection.connectionID, forKey: Self.activeConnectionIDKey)
+        return [connection]
     }
 
     func save(_ connection: AllegroBackendConnection) {
+        var connections = loadAll().filter { existing in
+            guard existing.connectionID != connection.connectionID else { return false }
+            if let accountID = connection.accountID, !accountID.isEmpty {
+                return existing.accountID != accountID
+            }
+            return true
+        }
+        connections.insert(connection, at: 0)
+        saveAll(connections)
+        userDefaults.set(connection.connectionID, forKey: Self.activeConnectionIDKey)
         guard let data = try? JSONEncoder().encode(connection) else { return }
         userDefaults.set(data, forKey: Self.storageKey)
     }
 
+    func saveAll(_ connections: [AllegroBackendConnection]) {
+        guard let data = try? JSONEncoder().encode(connections) else { return }
+        userDefaults.set(data, forKey: Self.storageListKey)
+    }
+
+    func activate(_ connection: AllegroBackendConnection) {
+        userDefaults.set(connection.connectionID, forKey: Self.activeConnectionIDKey)
+        guard let data = try? JSONEncoder().encode(connection) else { return }
+        userDefaults.set(data, forKey: Self.storageKey)
+    }
+
+    func delete(_ connection: AllegroBackendConnection) {
+        let remaining = loadAll().filter { $0.connectionID != connection.connectionID }
+        saveAll(remaining)
+        if userDefaults.string(forKey: Self.activeConnectionIDKey) == connection.connectionID {
+            if let next = remaining.first {
+                activate(next)
+            } else {
+                userDefaults.removeObject(forKey: Self.activeConnectionIDKey)
+                userDefaults.removeObject(forKey: Self.storageKey)
+            }
+        }
+    }
+
     func delete() {
         userDefaults.removeObject(forKey: Self.storageKey)
+        userDefaults.removeObject(forKey: Self.storageListKey)
+        userDefaults.removeObject(forKey: Self.activeConnectionIDKey)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
@@ -139,7 +229,15 @@ struct AllegroBackendAccount: Decodable, Equatable {
     var email: String?
     var firstName: String?
     var lastName: String?
-    var companyName: String?
+    var company: AllegroBackendAccountCompany?
+
+    var companyName: String? {
+        company?.name
+    }
+
+    var companyTaxID: String? {
+        company?.taxId
+    }
 
     var displayName: String {
         let personName = [firstName, lastName]
@@ -151,6 +249,11 @@ struct AllegroBackendAccount: Decodable, Equatable {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty } ?? "Allegro account"
     }
+}
+
+struct AllegroBackendAccountCompany: Decodable, Equatable {
+    var name: String?
+    var taxId: String?
 }
 
 private struct AllegroBackendOrdersResponse: Decodable {

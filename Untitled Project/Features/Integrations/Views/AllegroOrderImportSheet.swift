@@ -7,24 +7,39 @@ struct AllegroOrderImportSheet: View {
     let onImport: ([Invoice], [Client]) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var connections: [AllegroBackendConnection] = []
+    @State private var selectedConnectionID: String?
     @State private var orders: [AllegroCheckoutForm] = []
     @State private var selectedOrderIDs: Set<String> = []
     @State private var statusMessage: StatusMessage?
     @State private var isLoading = false
+    @State private var isImporting = false
     @State private var selectedRange: AllegroImportRange = .thirtyDays
     @State private var responseMeta: AllegroBackendOrdersMeta?
     @State private var connectedAccount: AllegroBackendAccount?
     @State private var hasCheckedAccount = false
+    @State private var showsOrderList = false
 
-    private var existingAllegroOrderIDs: Set<String> {
-        Set(existingInvoices.compactMap { invoice in
-            guard invoice.marketplaceReference?.source == .allegro else { return nil }
-            return invoice.marketplaceReference?.orderID
-        })
+    private let compactImportThreshold = 50
+
+    private var selectedConnection: AllegroBackendConnection? {
+        let activeID = selectedConnectionID ?? connections.first?.connectionID
+        return connections.first { $0.connectionID == activeID }
+    }
+
+    private var selectedSourceAccountID: String? {
+        selectedConnection?.accountID ?? selectedConnection?.connectionID
     }
 
     private var importableOrders: [AllegroCheckoutForm] {
-        orders.filter { !existingAllegroOrderIDs.contains($0.id) }
+        orders.filter { order in
+            !existingInvoices.contains { invoice in
+                guard let reference = invoice.marketplaceReference, reference.source == .allegro else { return false }
+                guard reference.orderID == order.id else { return false }
+                guard let selectedSourceAccountID else { return true }
+                return reference.sourceAccountID == nil || reference.sourceAccountID == selectedSourceAccountID
+            }
+        }
     }
 
     private var selectedOrders: [AllegroCheckoutForm] {
@@ -35,17 +50,62 @@ struct AllegroOrderImportSheet: View {
         max(orders.count - importableOrders.count, 0)
     }
 
-    private var sellerName: String {
+    private var usesCompactImport: Bool {
+        importableOrders.count > compactImportThreshold
+    }
+
+    private var shouldShowOrderRows: Bool {
+        !usesCompactImport || showsOrderList
+    }
+
+    private var localSellerName: String {
         seller?.name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Not selected"
     }
 
+    private var allegroSellerName: String {
+        allegroSeller?.name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Unavailable"
+    }
+
     private var connectedAccountName: String {
-        connectedAccount?.displayName ?? (hasCheckedAccount ? "Unavailable" : "Checking...")
+        connectedAccount?.displayName ?? selectedConnection?.shopName ?? (hasCheckedAccount ? "Unavailable" : "Checking...")
+    }
+
+    private var allegroSeller: CompanyFormData? {
+        guard let connectedAccount else { return nil }
+        let companyName = connectedAccount.companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let taxID = connectedAccount.companyTaxID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !companyName.isEmpty || !taxID.isEmpty else { return nil }
+
+        var company = CompanyFormData.empty
+        company.name = companyName.isEmpty ? connectedAccount.displayName : companyName
+        company.taxId = taxID
+        company.vatId = taxID
+        return company
     }
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    if connections.isEmpty {
+                        Label("Connect an Allegro shop before importing orders.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Picker("Shop", selection: Binding(
+                            get: { selectedConnectionID ?? connections.first?.connectionID ?? "" },
+                            set: { selectedConnectionID = $0 }
+                        )) {
+                            ForEach(connections) { connection in
+                                Text(connection.shopName).tag(connection.connectionID)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Shop")
+                } footer: {
+                    Text("Each Allegro shop is imported separately, even when several shops share the same legal seller and VAT ID.")
+                }
+
                 Section {
                     Picker("Range", selection: $selectedRange) {
                         ForEach(AllegroImportRange.allCases) { range in
@@ -61,15 +121,16 @@ struct AllegroOrderImportSheet: View {
 
                 Section {
                     LabeledContent("Connected account", value: connectedAccountName)
-                    LabeledContent("Invoice seller", value: sellerName)
-                    if seller == nil {
-                        Label("Set the correct seller profile before importing invoices.", systemImage: "exclamationmark.triangle")
+                    LabeledContent("Allegro seller", value: allegroSellerName)
+                    LabeledContent("Local seller", value: localSellerName)
+                    if hasCheckedAccount && allegroSeller == nil {
+                        Label("Allegro did not return seller company details for this account.", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                     }
                 } header: {
                     Text("Seller")
                 } footer: {
-                    Text("Imported invoices use the selected My Company seller profile, not the Allegro login name.")
+                    Text("Imported invoices use the seller company returned by the connected Allegro account. Local seller profiles are shown only for comparison.")
                 }
 
                 if let statusMessage {
@@ -79,9 +140,9 @@ struct AllegroOrderImportSheet: View {
                     }
                 }
 
-                if isLoading {
+                if isLoading || isImporting {
                     Section {
-                        ProgressView("Loading Allegro orders...")
+                        ProgressView(isImporting ? "Importing selected orders..." : "Loading Allegro orders...")
                     }
                 } else if !orders.isEmpty {
                     Section {
@@ -90,6 +151,7 @@ struct AllegroOrderImportSheet: View {
                             LabeledContent("Available in Allegro", value: "\(totalAvailable)")
                         }
                         LabeledContent("Ready to import", value: "\(importableOrders.count)")
+                        LabeledContent("Selected", value: "\(selectedOrderIDs.count)")
                         if skippedOrderCount > 0 {
                             LabeledContent("Already imported", value: "\(skippedOrderCount)")
                         }
@@ -103,9 +165,25 @@ struct AllegroOrderImportSheet: View {
                             Text("Allegro has more matching orders than this import can fetch at once. Narrow the date range or import in batches.")
                         }
                     }
+
+                    if !importableOrders.isEmpty {
+                        Section {
+                            Button(selectedOrderIDs.count == importableOrders.count ? "Deselect All" : "Select All") {
+                                toggleAllOrders()
+                            }
+
+                            if usesCompactImport {
+                                Toggle("Show order list", isOn: $showsOrderList)
+                                Label("Large imports are summarized to keep the app responsive.", systemImage: "speedometer")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } header: {
+                            Text("Selection")
+                        }
+                    }
                 }
 
-                if !isLoading && importableOrders.isEmpty {
+                if !isLoading && !isImporting && importableOrders.isEmpty {
                     Section {
                         ContentUnavailableView(
                             orders.isEmpty ? "No Allegro Orders" : "No New Orders",
@@ -113,7 +191,7 @@ struct AllegroOrderImportSheet: View {
                             description: Text(orders.isEmpty ? "Try a wider history range or import again after receiving orders." : "All fetched Allegro orders already have invoice drafts.")
                         )
                     }
-                } else if !isLoading {
+                } else if !isLoading && !isImporting && shouldShowOrderRows {
                     Section("Orders") {
                         ForEach(importableOrders) { order in
                             Button {
@@ -151,6 +229,7 @@ struct AllegroOrderImportSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isImporting)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -158,15 +237,18 @@ struct AllegroOrderImportSheet: View {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .disabled(isLoading)
+                    .disabled(isLoading || isImporting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Import", action: importSelectedOrders)
-                        .disabled(selectedOrders.isEmpty || seller == nil)
+                    Button(isImporting ? "Importing..." : "Import", action: importSelectedOrders)
+                        .disabled(selectedOrders.isEmpty || allegroSeller == nil || isImporting)
                 }
             }
             .task { await loadOrders() }
             .onChange(of: selectedRange) { _, _ in
+                Task { await reloadOrders() }
+            }
+            .onChange(of: selectedConnectionID) { _, _ in
                 Task { await reloadOrders() }
             }
         }
@@ -178,13 +260,19 @@ struct AllegroOrderImportSheet: View {
         responseMeta = nil
         connectedAccount = nil
         hasCheckedAccount = false
+        showsOrderList = false
         statusMessage = nil
         await loadOrders(forceReload: true)
     }
 
     private func loadOrders(forceReload: Bool = false) async {
+        let store = AllegroBackendConnectionStore()
+        connections = store.loadAll()
+        if selectedConnectionID == nil {
+            selectedConnectionID = store.load()?.connectionID ?? connections.first?.connectionID
+        }
         guard forceReload || orders.isEmpty else { return }
-        guard let connection = AllegroBackendConnectionStore().load(),
+        guard let connection = selectedConnection,
               let client = AllegroBackendConnectionClient(brokerBaseURL: connection.brokerBaseURL) else {
             statusMessage = StatusMessage(text: "Connect Allegro before importing orders.", systemImage: "exclamationmark.triangle", color: .orange)
             return
@@ -200,8 +288,15 @@ struct AllegroOrderImportSheet: View {
             orders = result.orders
             responseMeta = result.meta
             connectedAccount = await account
+            if let connectedAccount {
+                let enrichedConnection = connection.enriched(with: connectedAccount)
+                store.save(enrichedConnection)
+                connections = store.loadAll()
+                selectedConnectionID = enrichedConnection.connectionID
+            }
             hasCheckedAccount = true
             selectedOrderIDs = Set(importableOrders.map(\.id))
+            showsOrderList = importableOrders.count <= compactImportThreshold
         } catch {
             connectedAccount = await account
             hasCheckedAccount = true
@@ -217,22 +312,38 @@ struct AllegroOrderImportSheet: View {
         }
     }
 
+    private func toggleAllOrders() {
+        if selectedOrderIDs.count == importableOrders.count {
+            selectedOrderIDs = []
+        } else {
+            selectedOrderIDs = Set(importableOrders.map(\.id))
+        }
+    }
+
     private func importSelectedOrders() {
-        guard seller != nil else {
-            statusMessage = StatusMessage(text: "Set the correct seller profile before importing invoices.", systemImage: "exclamationmark.triangle", color: .orange)
+        guard let allegroSeller else {
+            statusMessage = StatusMessage(text: "Allegro did not return seller company details for this account.", systemImage: "exclamationmark.triangle", color: .orange)
             return
         }
 
-        let invoices = selectedOrders.enumerated().map { offset, order in
-            AllegroInvoiceMapper.makeInvoiceDraft(
-                from: order,
-                invoiceNumber: makeInvoiceNumber(offset),
-                seller: seller
-            )
+        let sourceConnection = selectedConnection
+        let ordersToImport = selectedOrders
+        isImporting = true
+        Task { @MainActor in
+            await Task.yield()
+            let invoices = ordersToImport.enumerated().map { offset, order in
+                AllegroInvoiceMapper.makeInvoiceDraft(
+                    from: order,
+                    invoiceNumber: makeInvoiceNumber(offset),
+                    seller: allegroSeller,
+                    sourceConnection: sourceConnection
+                )
+            }
+            let clients = ordersToImport.map { AllegroInvoiceMapper.makeClient(from: $0, sourceConnection: sourceConnection) }
+            onImport(invoices, clients)
+            isImporting = false
+            dismiss()
         }
-        let clients = selectedOrders.map { AllegroInvoiceMapper.makeClient(from: $0) }
-        onImport(invoices, clients)
-        dismiss()
     }
 
     private func orderSubtitle(_ order: AllegroCheckoutForm) -> String {

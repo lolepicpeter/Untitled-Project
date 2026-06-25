@@ -23,6 +23,7 @@ const allegroAPIBaseURL = environment === "sandbox"
 
 const pendingStates = new Map();
 const connections = new Map();
+const oauthStateTTLMillis = 15 * 60 * 1000;
 const pool = databaseURL ? new pg.Pool({
   connectionString: databaseURL,
   ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false }
@@ -42,13 +43,14 @@ app.get("/health", (request, response) => {
   });
 });
 
-app.get("/allegro/oauth/start", (request, response) => {
+app.get("/allegro/oauth/start", async (request, response) => {
   const state = crypto.randomUUID();
   const callbackURL = new URL(appCallbackURL);
   callbackURL.searchParams.set("state", state);
 
-  pendingStates.set(state, {
+  await saveOAuthState(state, {
     createdAt: Date.now(),
+    expiresAt: Date.now() + oauthStateTTLMillis,
     appCallbackURL: callbackURL.toString()
   });
 
@@ -64,14 +66,14 @@ app.get("/allegro/oauth/start", (request, response) => {
 
 app.get("/allegro/oauth/callback", async (request, response) => {
   const { code, state, error } = request.query;
-  const pending = typeof state === "string" ? pendingStates.get(state) : undefined;
+  const pending = typeof state === "string" ? await getOAuthState(state) : undefined;
 
   if (!pending) {
     response.status(400).send("Invalid or expired Allegro OAuth state.");
     return;
   }
 
-  pendingStates.delete(state);
+  await deleteOAuthState(state);
 
   if (typeof error === "string" && error.length > 0) {
     response.redirect(appCallbackWithError(pending.appCallbackURL, error));
@@ -314,6 +316,17 @@ async function initializeStorage() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS allegro_oauth_states (
+      state TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      app_callback_url TEXT NOT NULL
+    )
+  `);
+
+  await pool.query("DELETE FROM allegro_oauth_states WHERE expires_at <= NOW()");
 }
 
 async function getConnection(connectionID) {
@@ -358,6 +371,64 @@ async function deleteConnection(connectionID) {
   }
 
   await pool.query("DELETE FROM allegro_connections WHERE id = $1", [connectionID]);
+}
+
+async function saveOAuthState(state, pending) {
+  if (!pool) {
+    pendingStates.set(state, pending);
+    return;
+  }
+
+  await pool.query(
+    `INSERT INTO allegro_oauth_states (state, created_at, expires_at, app_callback_url)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (state)
+     DO UPDATE SET created_at = EXCLUDED.created_at,
+                   expires_at = EXCLUDED.expires_at,
+                   app_callback_url = EXCLUDED.app_callback_url`,
+    [
+      state,
+      new Date(pending.createdAt),
+      new Date(pending.expiresAt),
+      pending.appCallbackURL
+    ]
+  );
+}
+
+async function getOAuthState(state) {
+  if (!pool) {
+    const pending = pendingStates.get(state);
+    if (!pending || Number(pending.expiresAt || 0) <= Date.now()) {
+      pendingStates.delete(state);
+      return undefined;
+    }
+    return pending;
+  }
+
+  await pool.query("DELETE FROM allegro_oauth_states WHERE expires_at <= NOW()");
+  const result = await pool.query(
+    "SELECT created_at, expires_at, app_callback_url FROM allegro_oauth_states WHERE state = $1",
+    [state]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return undefined;
+  }
+
+  return {
+    createdAt: new Date(row.created_at).getTime(),
+    expiresAt: new Date(row.expires_at).getTime(),
+    appCallbackURL: row.app_callback_url
+  };
+}
+
+async function deleteOAuthState(state) {
+  if (!pool) {
+    pendingStates.delete(state);
+    return;
+  }
+
+  await pool.query("DELETE FROM allegro_oauth_states WHERE state = $1", [state]);
 }
 
 async function checkoutFormsByDateRange(accessToken, options) {

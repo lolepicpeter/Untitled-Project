@@ -15,6 +15,12 @@ struct ClientsView: View {
 }
 
 private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+private extension String {
     var normalizedClientName: String {
         trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
@@ -884,6 +890,10 @@ private struct ClientContactDetailView: View {
         client.marketplaceSource ?? summary.marketplaceSource
     }
 
+    private var sourceAccountName: String? {
+        client.marketplaceAccountName ?? summary.marketplaceAccountName
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -965,7 +975,7 @@ private struct ClientContactDetailView: View {
                         .lineLimit(1)
 
                     if let source {
-                        ClientSourceBadge(source: source)
+                        ClientSourceBadge(source: source, accountName: sourceAccountName)
                     }
 
                     if client.companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1245,6 +1255,10 @@ private struct SelectedClientSummaryRow: View {
         client.marketplaceSource ?? summary.marketplaceSource
     }
 
+    private var sourceAccountName: String? {
+        client.marketplaceAccountName ?? summary.marketplaceAccountName
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Image(systemName: summary.iconName)
@@ -1258,7 +1272,7 @@ private struct SelectedClientSummaryRow: View {
                         .lineLimit(1)
 
                     if let source {
-                        ClientSourceBadge(source: source)
+                        ClientSourceBadge(source: source, accountName: sourceAccountName)
                     }
                 }
 
@@ -1377,6 +1391,12 @@ private struct ClientInvoiceSummary {
         allInvoices.compactMap { $0.marketplaceReference?.source }.first
     }
 
+    var marketplaceAccountName: String? {
+        allInvoices.compactMap { invoice in
+            invoice.marketplaceReference?.sourceAccountName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        }.first
+    }
+
     var iconName: String {
         overdueCount > 0 ? "exclamationmark.triangle.fill" : "doc.text"
     }
@@ -1398,15 +1418,24 @@ private struct ClientInvoiceSummary {
 
 private struct ClientSourceBadge: View {
     let source: MarketplaceSource
+    let accountName: String?
+
+    private var title: String {
+        guard let accountName = accountName?.trimmingCharacters(in: .whitespacesAndNewlines), !accountName.isEmpty else {
+            return source.title
+        }
+        return "\(source.title) · \(accountName)"
+    }
 
     var body: some View {
-        Label(source.title, systemImage: "shippingbox")
+        Label(title, systemImage: "shippingbox")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.orange)
             .labelStyle(.titleAndIcon)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(.orange.opacity(0.12), in: Capsule())
+            .lineLimit(1)
     }
 }
 
@@ -1435,6 +1464,10 @@ private struct ClientRow: View {
         client.marketplaceSource ?? invoiceSummary.marketplaceSource
     }
 
+    private var sourceAccountName: String? {
+        client.marketplaceAccountName ?? invoiceSummary.marketplaceAccountName
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1443,7 +1476,7 @@ private struct ClientRow: View {
                     .lineLimit(1)
 
                 if let source {
-                    ClientSourceBadge(source: source)
+                    ClientSourceBadge(source: source, accountName: sourceAccountName)
                 }
 
                 if isMissingCompanyName {

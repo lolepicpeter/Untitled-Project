@@ -177,10 +177,17 @@ final class InvoiceStore {
     }
 
     func save(_ invoice: Invoice) {
-        if let index = invoices.firstIndex(where: { $0.id == invoice.id }) {
-            invoices[index] = invoice
-        } else {
-            invoices.append(invoice)
+        saveAll([invoice])
+    }
+
+    func saveAll(_ invoicesToSave: [Invoice]) {
+        guard !invoicesToSave.isEmpty else { return }
+        for invoice in invoicesToSave {
+            if let index = invoices.firstIndex(where: { $0.id == invoice.id }) {
+                invoices[index] = invoice
+            } else {
+                invoices.append(invoice)
+            }
         }
 
         sortInvoices()

@@ -182,6 +182,7 @@ enum AllegroInvoiceMapper {
         from order: AllegroCheckoutForm,
         invoiceNumber: String,
         seller: CompanyFormData?,
+        sourceConnection: AllegroBackendConnection? = nil,
         defaults: InvoiceDefaults = .load(),
         importedAt: Date = Date()
     ) -> Invoice {
@@ -208,7 +209,9 @@ enum AllegroInvoiceMapper {
             orderID: order.id,
             orderNumber: order.id,
             importedAt: importedAt,
-            externalStatus: order.status
+            externalStatus: order.status,
+            sourceAccountID: sourceConnection?.accountID ?? sourceConnection?.connectionID,
+            sourceAccountName: sourceConnection?.shopName
         )
 
         if let seller {
@@ -234,7 +237,7 @@ enum AllegroInvoiceMapper {
         return invoice
     }
 
-    static func makeClient(from order: AllegroCheckoutForm) -> Client {
+    static func makeClient(from order: AllegroCheckoutForm, sourceConnection: AllegroBackendConnection? = nil) -> Client {
         let address = billingAddress(from: order)
         var client = Client.empty
         client.countryCode = address?.countryCode.isEmpty == false ? address?.countryCode ?? client.countryCode : client.countryCode
@@ -250,6 +253,8 @@ enum AllegroInvoiceMapper {
         client.shippingCity = order.delivery?.address?.city ?? ""
         client.shippingPostalCode = order.delivery?.address?.postCode ?? ""
         client.marketplaceSource = .allegro
+        client.marketplaceAccountID = sourceConnection?.accountID ?? sourceConnection?.connectionID
+        client.marketplaceAccountName = sourceConnection?.shopName
         return client
     }
 
