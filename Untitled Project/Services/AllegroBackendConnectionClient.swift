@@ -71,7 +71,7 @@ struct AllegroBackendConnectionClient {
         do {
             return try JSONDecoder().decode(AllegroBackendOrdersResponse.self, from: data).orders
         } catch {
-            throw AllegroBackendConnectionError.decodingFailed(error.localizedDescription)
+            throw AllegroBackendConnectionError.decodingFailed(Self.describeDecodingError(error, data: data))
         }
     }
 
@@ -83,6 +83,16 @@ struct AllegroBackendConnectionClient {
               httpResponse.statusCode == 204 || httpResponse.statusCode == 404 else {
             throw AllegroBackendConnectionError.disconnectFailed
         }
+    }
+
+    private static func describeDecodingError(_ error: Error, data: Data) -> String {
+        let preview = String(data: data.prefix(300), encoding: .utf8) ?? "<non-UTF8 response>"
+
+        if let decodingError = error as? DecodingError {
+            return "\(decodingError.debugDescription) Response starts with: \(preview)"
+        }
+
+        return "\(error.localizedDescription) Response starts with: \(preview)"
     }
 }
 

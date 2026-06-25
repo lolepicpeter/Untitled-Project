@@ -82,12 +82,12 @@ struct AllegroCheckoutForm: Decodable, Identifiable, Equatable {
         id = try container.decode(String.self, forKey: .id)
         revision = try container.decodeIfPresent(String.self, forKey: .revision) ?? ""
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
-        buyer = try container.decodeIfPresent(AllegroBuyer.self, forKey: .buyer) ?? .empty
-        invoice = try container.decodeIfPresent(AllegroInvoiceRequest.self, forKey: .invoice)
-        lineItems = try container.decodeIfPresent([AllegroLineItem].self, forKey: .lineItems) ?? []
-        delivery = try container.decodeIfPresent(AllegroDelivery.self, forKey: .delivery)
-        payment = try container.decodeIfPresent(AllegroPayment.self, forKey: .payment)
-        summary = try container.decodeIfPresent(AllegroOrderSummary.self, forKey: .summary)
+        buyer = (try? container.decodeIfPresent(AllegroBuyer.self, forKey: .buyer)) ?? .empty
+        invoice = try? container.decodeIfPresent(AllegroInvoiceRequest.self, forKey: .invoice)
+        lineItems = (try? container.decodeIfPresent([AllegroLineItem].self, forKey: .lineItems)) ?? []
+        delivery = try? container.decodeIfPresent(AllegroDelivery.self, forKey: .delivery)
+        payment = try? container.decodeIfPresent(AllegroPayment.self, forKey: .payment)
+        summary = try? container.decodeIfPresent(AllegroOrderSummary.self, forKey: .summary)
         updatedAt = try container.decodeFlexibleDateIfPresent(forKey: .updatedAt)
     }
 }
@@ -229,11 +229,11 @@ struct AllegroLineItem: Decodable, Identifiable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
+        id = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString
         quantity = try container.decodeFlexibleDoubleIfPresent(forKey: .quantity) ?? 0
-        originalPrice = try container.decodeIfPresent(AllegroAmount.self, forKey: .originalPrice)
-        price = try container.decodeIfPresent(AllegroAmount.self, forKey: .price)
-        tax = try container.decodeIfPresent(AllegroTax.self, forKey: .tax)
+        originalPrice = try? container.decodeIfPresent(AllegroAmount.self, forKey: .originalPrice)
+        price = try? container.decodeIfPresent(AllegroAmount.self, forKey: .price)
+        tax = try? container.decodeIfPresent(AllegroTax.self, forKey: .tax)
 
         if let offer = try? container.nestedContainer(keyedBy: OfferKeys.self, forKey: .offer) {
             offerName = try offer.decodeIfPresent(String.self, forKey: .name) ?? "Allegro item"
@@ -325,20 +325,20 @@ struct AllegroAmount: Decodable, Equatable {
 
 extension KeyedDecodingContainer {
     func decodeFlexibleDoubleIfPresent(forKey key: Key) throws -> Double? {
-        if let value = try decodeIfPresent(Double.self, forKey: key) {
+        if let value = try? decodeIfPresent(Double.self, forKey: key) {
             return value
         }
-        if let value = try decodeIfPresent(Int.self, forKey: key) {
+        if let value = try? decodeIfPresent(Int.self, forKey: key) {
             return Double(value)
         }
-        if let value = try decodeIfPresent(String.self, forKey: key) {
+        if let value = try? decodeIfPresent(String.self, forKey: key) {
             return Double(value.replacingOccurrences(of: ",", with: "."))
         }
         return nil
     }
 
     func decodeFlexibleDateIfPresent(forKey key: Key) throws -> Date? {
-        guard let value = try decodeIfPresent(String.self, forKey: key), !value.isEmpty else {
+        guard let value = try? decodeIfPresent(String.self, forKey: key), !value.isEmpty else {
             return nil
         }
 
