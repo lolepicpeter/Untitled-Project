@@ -99,6 +99,27 @@ app.get("/allegro/connections/:connectionID", (request, response) => {
   });
 });
 
+app.get("/allegro/connections/:connectionID/orders", async (request, response) => {
+  const connection = connections.get(request.params.connectionID);
+  if (!connection) {
+    response.status(404).json({ error: { message: "Connection not found." } });
+    return;
+  }
+
+  const limit = clampNumber(Number(request.query.limit || 25), 1, 100);
+
+  try {
+    const orders = await recentCheckoutForms(connection.token.access_token, limit);
+    response.json({ orders });
+  } catch (error) {
+    response.status(502).json({
+      error: {
+        message: error instanceof Error ? error.message : "Could not fetch Allegro orders."
+      }
+    });
+  }
+});
+
 app.delete("/allegro/connections/:connectionID", (request, response) => {
   connections.delete(request.params.connectionID);
   response.status(204).end();
@@ -124,6 +145,13 @@ function appCallbackWithError(callback, error) {
   const callbackURL = new URL(callback);
   callbackURL.searchParams.set("error", error);
   return callbackURL.toString();
+}
+
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(Math.max(Math.trunc(value), min), max);
 }
 
 async function exchangeAuthorizationCode(code) {
@@ -154,4 +182,56 @@ async function exchangeAuthorizationCode(code) {
     savedAt: Date.now(),
     expiresAt: Date.now() + Number(token.expires_in || 0) * 1000
   };
+}
+
+async function recentCheckoutForms(accessToken, limit) {
+  const eventsURL = new URL("/order/events", allegroBaseURL);
+  eventsURL.searchParams.set("limit", String(limit));
+
+  const eventsResponse = await allegroRequest(eventsURL, accessToken);
+  const checkoutFormIDs = uniqueCheckoutFormIDs(eventsResponse.events || []).slice(0, limit);
+
+  const orders = [];
+  for (const checkoutFormID of checkoutFormIDs) {
+    try {
+      const order = await allegroRequest(new URL(`/order/checkout-forms/${checkoutFormID}`, allegroBaseURL), accessToken);
+      orders.push(order);
+    } catch (error) {
+      console.error(`Could not fetch checkout form ${checkoutFormID}`, error);
+    }
+  }
+
+  return orders;
+}
+
+function uniqueCheckoutFormIDs(events) {
+  const ids = [];
+  const seen = new Set();
+
+  for (const event of events) {
+    const checkoutFormID = event?.checkoutForm?.id || event?.order?.checkoutForm?.id;
+    if (typeof checkoutFormID !== "string" || checkoutFormID.length === 0 || seen.has(checkoutFormID)) {
+      continue;
+    }
+    seen.add(checkoutFormID);
+    ids.push(checkoutFormID);
+  }
+
+  return ids;
+}
+
+async function allegroRequest(url, accessToken) {
+  const response = await fetch(url, {
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Accept": "application/vnd.allegro.public.v1+json"
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Allegro request failed (${response.status}): ${text}`);
+  }
+
+  return response.json();
 }

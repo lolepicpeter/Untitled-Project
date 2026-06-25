@@ -115,9 +115,11 @@ private extension Invoice {
 
 private struct MobileInvoicesView: View {
     @State private var store = InvoiceStore()
+    @State private var clientStore = ClientStore()
     @State private var profileStore = MyCompanyProfileStore()
     @State private var invoiceDraft: Invoice?
     @State private var isShowingSellerSetup = false
+    @State private var isShowingAllegroImport = false
     @State private var quickPaymentDraft: QuickPaymentDraft?
     @State private var invoicesPendingDiscard: [Invoice] = []
     @State private var searchText = ""
@@ -253,10 +255,15 @@ private struct MobileInvoicesView: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        addInvoice()
+                    Menu {
+                        Button(action: addInvoice) {
+                            Label("New Invoice", systemImage: "plus")
+                        }
+                        Button(action: importFromAllegro) {
+                            Label("Import from Allegro", systemImage: "cart")
+                        }
                     } label: {
-                        Label("New Invoice", systemImage: "plus")
+                        Label("Add", systemImage: "plus")
                     }
                 }
             }
@@ -272,6 +279,14 @@ private struct MobileInvoicesView: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $isShowingAllegroImport) {
+                AllegroOrderImportSheet(
+                    existingInvoices: store.invoices,
+                    makeInvoiceNumber: invoiceNumberForImportedOrder(offset:),
+                    seller: profileStore.hasSavedProfile ? profileStore.company : nil,
+                    onImport: importAllegroInvoices
+                )
             }
             .sheet(item: $quickPaymentDraft) { draft in
                 InvoicePaymentSheet(invoice: draft.invoice, payment: draft.payment) { payment in
@@ -310,6 +325,7 @@ private struct MobileInvoicesView: View {
             }
             .onAppear {
                 store.load()
+                clientStore.load()
                 profileStore.load()
             }
             .task {
@@ -329,6 +345,32 @@ private struct MobileInvoicesView: View {
         }
 
         invoiceDraft = store.newInvoiceDraft()
+    }
+
+    private func importFromAllegro() {
+        profileStore.load()
+        clientStore.load()
+        isShowingAllegroImport = true
+    }
+
+    private func invoiceNumberForImportedOrder(offset: Int) -> String {
+        let settings = InvoiceNumberingSettings.load()
+        let sequence = settings.nextSequence(from: store.invoices) + offset
+        return settings.formattedNumber(sequence: sequence)
+    }
+
+    private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
+        for client in clients {
+            if !clientStore.clients.contains(where: { existingClient in
+                !client.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(client.email) == .orderedSame
+            }) {
+                clientStore.save(client)
+            }
+        }
+
+        for invoice in invoices {
+            store.save(invoice)
+        }
     }
 
     private func canRecordPayment(for invoice: Invoice) -> Bool {
@@ -491,12 +533,14 @@ private struct MacInvoiceFilterBar: View {
 
 private struct MacInvoicesView: View {
     @State private var store = InvoiceStore()
+    @State private var clientStore = ClientStore()
     @State private var profileStore = MyCompanyProfileStore()
     @State private var selectedInvoiceIDs: Set<Invoice.ID> = []
     @State private var selectionAnchorInvoiceID: Invoice.ID?
     @State private var selectionExtentInvoiceID: Invoice.ID?
     @State private var editingInvoice: Invoice?
     @State private var isShowingSellerSetup = false
+    @State private var isShowingAllegroImport = false
     @State private var invoicesPendingDiscard: [Invoice] = []
     @State private var searchText = ""
     @State private var statusFilter: InvoiceListFilter = .all
@@ -745,6 +789,11 @@ private struct MacInvoicesView: View {
                     .help("Duplicate Selected Invoices")
                 }
 
+                Button(action: importFromAllegro) {
+                    Label("Import from Allegro", systemImage: "cart")
+                }
+                .help("Import Allegro Orders")
+
                 Button(action: addInvoice) {
                     Label("New Invoice", systemImage: "plus")
                 }
@@ -767,6 +816,15 @@ private struct MacInvoicesView: View {
                 }
             }
             .frame(minWidth: 1080, minHeight: 760)
+        }
+        .sheet(isPresented: $isShowingAllegroImport) {
+            AllegroOrderImportSheet(
+                existingInvoices: store.invoices,
+                makeInvoiceNumber: invoiceNumberForImportedOrder(offset:),
+                seller: profileStore.hasSavedProfile ? profileStore.company : nil,
+                onImport: importAllegroInvoices
+            )
+            .frame(minWidth: 680, minHeight: 560)
         }
         .sheet(isPresented: $isShowingSellerSetup, onDismiss: {
             profileStore.load()
@@ -797,6 +855,7 @@ private struct MacInvoicesView: View {
         }
         .onAppear {
             store.load()
+            clientStore.load()
             profileStore.load()
             if selectedInvoiceIDs.isEmpty, let firstInvoiceID = store.invoices.first?.id {
                 selectedInvoiceIDs = [firstInvoiceID]
@@ -826,6 +885,35 @@ private struct MacInvoicesView: View {
         }
 
         editingInvoice = store.newInvoiceDraft()
+    }
+
+    private func importFromAllegro() {
+        profileStore.load()
+        clientStore.load()
+        isShowingAllegroImport = true
+    }
+
+    private func invoiceNumberForImportedOrder(offset: Int) -> String {
+        let settings = InvoiceNumberingSettings.load()
+        let sequence = settings.nextSequence(from: store.invoices) + offset
+        return settings.formattedNumber(sequence: sequence)
+    }
+
+    private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
+        for client in clients {
+            if !clientStore.clients.contains(where: { existingClient in
+                !client.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(client.email) == .orderedSame
+            }) {
+                clientStore.save(client)
+            }
+        }
+
+        for invoice in invoices {
+            store.save(invoice)
+            selectedInvoiceIDs.insert(invoice.id)
+            selectionAnchorInvoiceID = invoice.id
+            selectionExtentInvoiceID = invoice.id
+        }
     }
 
     private func contextInvoices(for invoice: Invoice) -> [Invoice] {

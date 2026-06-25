@@ -127,4 +127,12 @@ Then open:
 https://api.snapbuy.sk/allegro/oauth/start
 ```
 
+After connecting Allegro, the app imports orders through:
+
+```text
+https://api.snapbuy.sk/allegro/connections/{connectionID}/orders
+```
+
+Render must be redeployed after backend changes before order import works.
+
 It should redirect to Allegro login.
