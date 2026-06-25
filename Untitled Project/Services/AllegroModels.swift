@@ -103,6 +103,37 @@ struct AllegroBuyer: Decodable, Equatable {
     let companyName: String
     let phoneNumber: String
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case login
+        case firstName
+        case lastName
+        case companyName
+        case phoneNumber
+    }
+
+    init(id: String, email: String, login: String, firstName: String, lastName: String, companyName: String, phoneNumber: String) {
+        self.id = id
+        self.email = email
+        self.login = login
+        self.firstName = firstName
+        self.lastName = lastName
+        self.companyName = companyName
+        self.phoneNumber = phoneNumber
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
+        login = try container.decodeIfPresent(String.self, forKey: .login) ?? ""
+        firstName = try container.decodeIfPresent(String.self, forKey: .firstName) ?? ""
+        lastName = try container.decodeIfPresent(String.self, forKey: .lastName) ?? ""
+        companyName = try container.decodeIfPresent(String.self, forKey: .companyName) ?? ""
+        phoneNumber = try container.decodeIfPresent(String.self, forKey: .phoneNumber) ?? ""
+    }
+
     var displayName: String {
         let company = companyName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !company.isEmpty { return company }

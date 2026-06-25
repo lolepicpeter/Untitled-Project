@@ -71,7 +71,7 @@ struct AllegroBackendConnectionClient {
         do {
             return try JSONDecoder().decode(AllegroBackendOrdersResponse.self, from: data).orders
         } catch {
-            throw AllegroBackendConnectionError.decodingFailed
+            throw AllegroBackendConnectionError.decodingFailed(error.localizedDescription)
         }
     }
 
@@ -104,7 +104,7 @@ enum AllegroBackendConnectionError: LocalizedError {
     case authorizationFailed(String)
     case invalidResponse
     case requestFailed(message: String?)
-    case decodingFailed
+    case decodingFailed(String)
     case disconnectFailed
 
     var errorDescription: String? {
@@ -119,8 +119,8 @@ enum AllegroBackendConnectionError: LocalizedError {
             "The Allegro broker returned an invalid response."
         case let .requestFailed(message):
             message ?? "The Allegro broker request failed."
-        case .decodingFailed:
-            "Could not read the Allegro broker response."
+        case let .decodingFailed(reason):
+            "Could not read the Allegro broker response: \(reason)"
         case .disconnectFailed:
             "Could not disconnect the Allegro broker connection."
         }
