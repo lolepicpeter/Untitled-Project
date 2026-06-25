@@ -1728,6 +1728,9 @@ private struct MacInvoicePreviewView: View {
                 .foregroundStyle(.secondary)
             Text(invoice.displayTitle)
                 .font(.title.weight(.bold))
+            if let source = invoice.marketplaceReference?.source {
+                InvoiceSourceBadge(source: source)
+            }
             Text(invoice.total.formatted(.currency(code: currencyCode)))
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.green)
@@ -2757,6 +2760,10 @@ private struct InvoiceRow: View {
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
 
+                    if let source = invoice.marketplaceReference?.source {
+                        InvoiceSourceBadge(source: source)
+                    }
+
                     InvoiceStatusBadge(status: invoice.displayStatus, isSelected: isSelected)
                 }
 
@@ -2813,6 +2820,21 @@ private struct InvoiceRow: View {
 
     private func formattedDate(_ date: Date) -> String {
         date.formatted(date: .abbreviated, time: .omitted)
+    }
+}
+
+private struct InvoiceSourceBadge: View {
+    let source: MarketplaceSource
+
+    var body: some View {
+        Label(source.title, systemImage: "shippingbox")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.orange)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.orange.opacity(0.13), in: Capsule())
+            .lineLimit(1)
     }
 }
 
@@ -3018,6 +3040,9 @@ struct MobileInvoiceDetailView: View {
             Text(invoice.total.formatted(.currency(code: currencyCode)))
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.green)
+            if let source = invoice.marketplaceReference?.source {
+                InvoiceSourceBadge(source: source)
+            }
             InvoiceStatusBadge(status: invoice.displayStatus)
             if invoice.displayStatus != .draft {
                 VStack(spacing: 6) {
