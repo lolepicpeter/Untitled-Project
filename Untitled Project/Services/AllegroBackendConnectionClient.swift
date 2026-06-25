@@ -120,19 +120,22 @@ enum AllegroBackendConnectionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidBrokerURL:
-            "Add a valid HTTPS Allegro broker URL before connecting."
+            return "Add a valid HTTPS Allegro broker URL before connecting."
         case .missingConnectionID:
-            "The Allegro broker did not return a connection ID."
+            return "The Allegro broker did not return a connection ID."
         case let .authorizationFailed(error):
-            "Allegro connection failed: \(error)"
+            return "Allegro connection failed: \(error)"
         case .invalidResponse:
-            "The Allegro broker returned an invalid response."
+            return "The Allegro broker returned an invalid response."
         case let .requestFailed(message):
-            message ?? "The Allegro broker request failed."
+            if message == "Connection not found." {
+                return "Allegro needs to be reconnected."
+            }
+            return message ?? "The Allegro broker request failed."
         case let .decodingFailed(reason):
-            "Could not read the Allegro broker response: \(reason)"
+            return "Could not read the Allegro broker response: \(reason)"
         case .disconnectFailed:
-            "Could not disconnect the Allegro broker connection."
+            return "Could not disconnect the Allegro broker connection."
         }
     }
 }

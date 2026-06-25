@@ -27,6 +27,10 @@ struct AllegroOrderImportSheet: View {
         importableOrders.filter { selectedOrderIDs.contains($0.id) }
     }
 
+    private var skippedOrderCount: Int {
+        max(orders.count - importableOrders.count, 0)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -41,7 +45,19 @@ struct AllegroOrderImportSheet: View {
                     Section {
                         ProgressView("Loading Allegro orders...")
                     }
-                } else if importableOrders.isEmpty {
+                } else if !orders.isEmpty {
+                    Section {
+                        LabeledContent("Fetched", value: "\(orders.count)")
+                        LabeledContent("Ready to import", value: "\(importableOrders.count)")
+                        if skippedOrderCount > 0 {
+                            LabeledContent("Already imported", value: "\(skippedOrderCount)")
+                        }
+                    } header: {
+                        Text("Summary")
+                    }
+                }
+
+                if !isLoading && importableOrders.isEmpty {
                     Section {
                         ContentUnavailableView(
                             orders.isEmpty ? "No Allegro Orders" : "No New Orders",
@@ -49,7 +65,7 @@ struct AllegroOrderImportSheet: View {
                             description: Text(orders.isEmpty ? "Connect Allegro and try again after receiving orders." : "All fetched Allegro orders already have invoice drafts.")
                         )
                     }
-                } else {
+                } else if !isLoading {
                     Section("Orders") {
                         ForEach(importableOrders) { order in
                             Button {

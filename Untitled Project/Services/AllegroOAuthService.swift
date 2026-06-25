@@ -95,7 +95,6 @@ final class AllegroOAuthConnector: NSObject {
         settings = AllegroConnectionSettings.load()
         token = try? tokenStore.load()
         backendConnection = backendConnectionStore.load()
-        backendConnection = backendConnectionStore.load()
         super.init()
         if isConnected, settings.connectedAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             settings.connectedAccountName = "Allegro account"
@@ -122,6 +121,7 @@ final class AllegroOAuthConnector: NSObject {
     func reload() {
         settings = AllegroConnectionSettings.load()
         token = try? tokenStore.load()
+        backendConnection = backendConnectionStore.load()
     }
 
     func saveSettings(_ newSettings: AllegroConnectionSettings) {

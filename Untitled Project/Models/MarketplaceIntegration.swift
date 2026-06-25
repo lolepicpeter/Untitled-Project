@@ -70,6 +70,8 @@ enum AllegroEnvironment: String, Codable, CaseIterable, Identifiable {
 }
 
 struct AllegroConnectionSettings: Codable, Equatable {
+    static let defaultBrokerBaseURL = "https://snapbuy-allegro-broker.onrender.com"
+
     private static let clientIDKey = "allegroConnection.clientID"
     private static let redirectURIKey = "allegroConnection.redirectURI"
     private static let environmentKey = "allegroConnection.environment"
@@ -108,7 +110,7 @@ struct AllegroConnectionSettings: Codable, Equatable {
             redirectURI: userDefaults.string(forKey: redirectURIKey) ?? "",
             environment: AllegroEnvironment(rawValue: rawEnvironment) ?? .production,
             connectedAccountName: userDefaults.string(forKey: connectedAccountNameKey) ?? "",
-            brokerBaseURL: userDefaults.string(forKey: brokerBaseURLKey) ?? ""
+            brokerBaseURL: userDefaults.string(forKey: brokerBaseURLKey) ?? defaultBrokerBaseURL
         )
     }
 

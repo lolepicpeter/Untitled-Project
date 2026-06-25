@@ -1,6 +1,16 @@
 import SwiftUI
 
 struct IntegrationsView: View {
+    @State private var allegroConnector = AllegroOAuthConnector()
+
+    private var allegroStatusText: String {
+        allegroConnector.isConnected ? "Connected" : "Connect your seller account and import orders for invoicing."
+    }
+
+    private var allegroStatusColor: Color {
+        allegroConnector.isConnected ? .green : .secondary
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -14,9 +24,9 @@ struct IntegrationsView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Allegro")
                                     .font(.headline)
-                                Text("Connect your seller account and import orders for invoicing.")
+                                Text(allegroStatusText)
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(allegroStatusColor)
                             }
                         }
                         .padding(.vertical, 6)
@@ -26,6 +36,7 @@ struct IntegrationsView: View {
                 }
             }
             .navigationTitle("Integrations")
+            .onAppear { allegroConnector.reload() }
         }
     }
 
