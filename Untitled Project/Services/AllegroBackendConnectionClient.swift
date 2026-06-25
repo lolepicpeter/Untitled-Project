@@ -50,6 +50,31 @@ struct AllegroBackendConnectionClient {
         brokerBaseURL.appending(path: "allegro/oauth/start")
     }
 
+    func orders(connectionID: String, limit: Int = 25) async throws -> [AllegroCheckoutForm] {
+        var components = URLComponents(url: brokerBaseURL.appending(path: "allegro/connections/\(connectionID)/orders"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 100))")]
+
+        guard let url = components?.url else {
+            throw AllegroBackendConnectionError.invalidBrokerURL
+        }
+
+        let (data, response) = try await urlSession.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AllegroBackendConnectionError.invalidResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let brokerError = try? JSONDecoder().decode(AllegroBackendErrorResponse.self, from: data)
+            throw AllegroBackendConnectionError.requestFailed(message: brokerError?.error.message)
+        }
+
+        do {
+            return try JSONDecoder().decode(AllegroBackendOrdersResponse.self, from: data).orders
+        } catch {
+            throw AllegroBackendConnectionError.decodingFailed
+        }
+    }
+
     func disconnect(connectionID: String) async throws {
         var request = URLRequest(url: brokerBaseURL.appending(path: "allegro/connections/\(connectionID)"))
         request.httpMethod = "DELETE"
@@ -61,10 +86,25 @@ struct AllegroBackendConnectionClient {
     }
 }
 
+private struct AllegroBackendOrdersResponse: Decodable {
+    let orders: [AllegroCheckoutForm]
+}
+
+private struct AllegroBackendErrorResponse: Decodable {
+    let error: AllegroBackendErrorBody
+}
+
+private struct AllegroBackendErrorBody: Decodable {
+    let message: String
+}
+
 enum AllegroBackendConnectionError: LocalizedError {
     case invalidBrokerURL
     case missingConnectionID
     case authorizationFailed(String)
+    case invalidResponse
+    case requestFailed(message: String?)
+    case decodingFailed
     case disconnectFailed
 
     var errorDescription: String? {
@@ -75,6 +115,12 @@ enum AllegroBackendConnectionError: LocalizedError {
             "The Allegro broker did not return a connection ID."
         case let .authorizationFailed(error):
             "Allegro connection failed: \(error)"
+        case .invalidResponse:
+            "The Allegro broker returned an invalid response."
+        case let .requestFailed(message):
+            message ?? "The Allegro broker request failed."
+        case .decodingFailed:
+            "Could not read the Allegro broker response."
         case .disconnectFailed:
             "Could not disconnect the Allegro broker connection."
         }
