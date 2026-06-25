@@ -24,10 +24,17 @@ final class ClientStore {
     }
 
     func save(_ client: Client) {
-        if let index = clients.firstIndex(where: { $0.id == client.id }) {
-            clients[index] = client
-        } else {
-            clients.append(client)
+        saveAll([client])
+    }
+
+    func saveAll(_ clientsToSave: [Client]) {
+        guard !clientsToSave.isEmpty else { return }
+        for client in clientsToSave {
+            if let index = clients.firstIndex(where: { $0.id == client.id }) {
+                clients[index] = client
+            } else {
+                clients.append(client)
+            }
         }
 
         clients.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }

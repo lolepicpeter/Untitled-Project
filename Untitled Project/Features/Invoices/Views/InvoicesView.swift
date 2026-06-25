@@ -361,16 +361,21 @@ private struct MobileInvoicesView: View {
 
     private func importAllegroInvoices(_ invoices: [Invoice], clients: [Client]) {
         var invoicesToSave = invoices
+        var clientsToSave: [Client] = []
+        var workingClients = clientStore.clients
 
         for (index, importedClient) in clients.enumerated() {
             var savedClient = importedClient
-            if let existingIndex = clientStore.clients.firstIndex(where: { existingClient in
+            if let existingIndex = workingClients.firstIndex(where: { existingClient in
                 !importedClient.email.isEmpty && existingClient.email.localizedCaseInsensitiveCompare(importedClient.email) == .orderedSame
             }) {
-                savedClient = clientStore.clients[existingIndex]
+                savedClient = workingClients[existingIndex]
                 savedClient.fillMissingDetails(from: importedClient)
+                workingClients[existingIndex] = savedClient
+            } else {
+                workingClients.append(savedClient)
             }
-            clientStore.save(savedClient)
+            clientsToSave.append(savedClient)
 
             if invoicesToSave.indices.contains(index) {
                 invoicesToSave[index].clientID = savedClient.id
@@ -379,9 +384,8 @@ private struct MobileInvoicesView: View {
             }
         }
 
-        for invoice in invoicesToSave {
-            store.save(invoice)
-        }
+        clientStore.saveAll(clientsToSave)
+        store.saveAll(invoicesToSave)
     }
 
     private func canRecordPayment(for invoice: Invoice) -> Bool {

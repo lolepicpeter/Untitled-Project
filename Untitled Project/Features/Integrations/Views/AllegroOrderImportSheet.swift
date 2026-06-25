@@ -11,10 +11,14 @@ struct AllegroOrderImportSheet: View {
     @State private var selectedOrderIDs: Set<String> = []
     @State private var statusMessage: StatusMessage?
     @State private var isLoading = false
+    @State private var isImporting = false
     @State private var selectedRange: AllegroImportRange = .thirtyDays
     @State private var responseMeta: AllegroBackendOrdersMeta?
     @State private var connectedAccount: AllegroBackendAccount?
     @State private var hasCheckedAccount = false
+    @State private var showsOrderList = false
+
+    private let compactImportThreshold = 50
 
     private var existingAllegroOrderIDs: Set<String> {
         Set(existingInvoices.compactMap { invoice in
@@ -33,6 +37,14 @@ struct AllegroOrderImportSheet: View {
 
     private var skippedOrderCount: Int {
         max(orders.count - importableOrders.count, 0)
+    }
+
+    private var usesCompactImport: Bool {
+        importableOrders.count > compactImportThreshold
+    }
+
+    private var shouldShowOrderRows: Bool {
+        !usesCompactImport || showsOrderList
     }
 
     private var sellerName: String {
@@ -79,9 +91,9 @@ struct AllegroOrderImportSheet: View {
                     }
                 }
 
-                if isLoading {
+                if isLoading || isImporting {
                     Section {
-                        ProgressView("Loading Allegro orders...")
+                        ProgressView(isImporting ? "Importing selected orders..." : "Loading Allegro orders...")
                     }
                 } else if !orders.isEmpty {
                     Section {
@@ -90,6 +102,7 @@ struct AllegroOrderImportSheet: View {
                             LabeledContent("Available in Allegro", value: "\(totalAvailable)")
                         }
                         LabeledContent("Ready to import", value: "\(importableOrders.count)")
+                        LabeledContent("Selected", value: "\(selectedOrderIDs.count)")
                         if skippedOrderCount > 0 {
                             LabeledContent("Already imported", value: "\(skippedOrderCount)")
                         }
@@ -103,9 +116,25 @@ struct AllegroOrderImportSheet: View {
                             Text("Allegro has more matching orders than this import can fetch at once. Narrow the date range or import in batches.")
                         }
                     }
+
+                    if !importableOrders.isEmpty {
+                        Section {
+                            Button(selectedOrderIDs.count == importableOrders.count ? "Deselect All" : "Select All") {
+                                toggleAllOrders()
+                            }
+
+                            if usesCompactImport {
+                                Toggle("Show order list", isOn: $showsOrderList)
+                                Label("Large imports are summarized to keep the app responsive.", systemImage: "speedometer")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } header: {
+                            Text("Selection")
+                        }
+                    }
                 }
 
-                if !isLoading && importableOrders.isEmpty {
+                if !isLoading && !isImporting && importableOrders.isEmpty {
                     Section {
                         ContentUnavailableView(
                             orders.isEmpty ? "No Allegro Orders" : "No New Orders",
@@ -113,7 +142,7 @@ struct AllegroOrderImportSheet: View {
                             description: Text(orders.isEmpty ? "Try a wider history range or import again after receiving orders." : "All fetched Allegro orders already have invoice drafts.")
                         )
                     }
-                } else if !isLoading {
+                } else if !isLoading && !isImporting && shouldShowOrderRows {
                     Section("Orders") {
                         ForEach(importableOrders) { order in
                             Button {
@@ -151,6 +180,7 @@ struct AllegroOrderImportSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isImporting)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -158,11 +188,11 @@ struct AllegroOrderImportSheet: View {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .disabled(isLoading)
+                    .disabled(isLoading || isImporting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Import", action: importSelectedOrders)
-                        .disabled(selectedOrders.isEmpty || seller == nil)
+                    Button(isImporting ? "Importing..." : "Import", action: importSelectedOrders)
+                        .disabled(selectedOrders.isEmpty || seller == nil || isImporting)
                 }
             }
             .task { await loadOrders() }
@@ -178,6 +208,7 @@ struct AllegroOrderImportSheet: View {
         responseMeta = nil
         connectedAccount = nil
         hasCheckedAccount = false
+        showsOrderList = false
         statusMessage = nil
         await loadOrders(forceReload: true)
     }
@@ -202,6 +233,7 @@ struct AllegroOrderImportSheet: View {
             connectedAccount = await account
             hasCheckedAccount = true
             selectedOrderIDs = Set(importableOrders.map(\.id))
+            showsOrderList = importableOrders.count <= compactImportThreshold
         } catch {
             connectedAccount = await account
             hasCheckedAccount = true
@@ -217,22 +249,36 @@ struct AllegroOrderImportSheet: View {
         }
     }
 
+    private func toggleAllOrders() {
+        if selectedOrderIDs.count == importableOrders.count {
+            selectedOrderIDs = []
+        } else {
+            selectedOrderIDs = Set(importableOrders.map(\.id))
+        }
+    }
+
     private func importSelectedOrders() {
         guard seller != nil else {
             statusMessage = StatusMessage(text: "Set the correct seller profile before importing invoices.", systemImage: "exclamationmark.triangle", color: .orange)
             return
         }
 
-        let invoices = selectedOrders.enumerated().map { offset, order in
-            AllegroInvoiceMapper.makeInvoiceDraft(
-                from: order,
-                invoiceNumber: makeInvoiceNumber(offset),
-                seller: seller
-            )
+        let ordersToImport = selectedOrders
+        isImporting = true
+        Task { @MainActor in
+            await Task.yield()
+            let invoices = ordersToImport.enumerated().map { offset, order in
+                AllegroInvoiceMapper.makeInvoiceDraft(
+                    from: order,
+                    invoiceNumber: makeInvoiceNumber(offset),
+                    seller: seller
+                )
+            }
+            let clients = ordersToImport.map { AllegroInvoiceMapper.makeClient(from: $0) }
+            onImport(invoices, clients)
+            isImporting = false
+            dismiss()
         }
-        let clients = selectedOrders.map { AllegroInvoiceMapper.makeClient(from: $0) }
-        onImport(invoices, clients)
-        dismiss()
     }
 
     private func orderSubtitle(_ order: AllegroCheckoutForm) -> String {
