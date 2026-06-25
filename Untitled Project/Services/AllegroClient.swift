@@ -249,6 +249,7 @@ enum AllegroInvoiceMapper {
         client.shippingStreet = order.delivery?.address?.street ?? ""
         client.shippingCity = order.delivery?.address?.city ?? ""
         client.shippingPostalCode = order.delivery?.address?.postCode ?? ""
+        client.marketplaceSource = .allegro
         return client
     }
 

@@ -22,6 +22,7 @@ struct Client: Identifiable, Codable, Equatable {
     var shippingApartment: String
     var shippingCity: String
     var shippingPostalCode: String
+    var marketplaceSource: MarketplaceSource?
 
     static var empty: Client {
         Client(
@@ -45,7 +46,8 @@ struct Client: Identifiable, Codable, Equatable {
             shippingStreet: "",
             shippingApartment: "",
             shippingCity: "",
-            shippingPostalCode: ""
+            shippingPostalCode: "",
+            marketplaceSource: nil
         )
     }
 
@@ -91,5 +93,6 @@ struct Client: Identifiable, Codable, Equatable {
         if shippingStreet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingStreet = importedClient.shippingStreet }
         if shippingCity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingCity = importedClient.shippingCity }
         if shippingPostalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shippingPostalCode = importedClient.shippingPostalCode }
+        if marketplaceSource == nil { marketplaceSource = importedClient.marketplaceSource }
     }
 }

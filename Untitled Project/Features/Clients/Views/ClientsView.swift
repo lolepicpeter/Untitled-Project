@@ -880,6 +880,10 @@ private struct ClientContactDetailView: View {
         client.primaryEmailURL != nil || client.phoneURL != nil || client.mobileMessageURL != nil || client.websiteURL != nil
     }
 
+    private var source: MarketplaceSource? {
+        client.marketplaceSource ?? summary.marketplaceSource
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -959,6 +963,10 @@ private struct ClientContactDetailView: View {
                     Text(client.displayName)
                         .font(.largeTitle.weight(.semibold))
                         .lineLimit(1)
+
+                    if let source {
+                        ClientSourceBadge(source: source)
+                    }
 
                     if client.companyName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("Needs details")
@@ -1233,6 +1241,10 @@ private struct SelectedClientSummaryRow: View {
     let client: Client
     let summary: ClientInvoiceSummary
 
+    private var source: MarketplaceSource? {
+        client.marketplaceSource ?? summary.marketplaceSource
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Image(systemName: summary.iconName)
@@ -1240,9 +1252,15 @@ private struct SelectedClientSummaryRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(client.displayName)
-                    .font(.headline)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(client.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    if let source {
+                        ClientSourceBadge(source: source)
+                    }
+                }
 
                 let subtitle = client.subtitle
                 if !subtitle.isEmpty {
@@ -1355,6 +1373,10 @@ private struct ClientInvoiceSummary {
         }
     }
 
+    var marketplaceSource: MarketplaceSource? {
+        allInvoices.compactMap { $0.marketplaceReference?.source }.first
+    }
+
     var iconName: String {
         overdueCount > 0 ? "exclamationmark.triangle.fill" : "doc.text"
     }
@@ -1371,6 +1393,20 @@ private struct ClientInvoiceSummary {
 
     private func plural(_ word: String, count: Int) -> String {
         count == 1 ? word : "\(word)s"
+    }
+}
+
+private struct ClientSourceBadge: View {
+    let source: MarketplaceSource
+
+    var body: some View {
+        Label(source.title, systemImage: "shippingbox")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.orange)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(.orange.opacity(0.12), in: Capsule())
     }
 }
 
@@ -1395,12 +1431,20 @@ private struct ClientRow: View {
         isMissingCompanyName ? .orange : .secondary
     }
 
+    private var source: MarketplaceSource? {
+        client.marketplaceSource ?? invoiceSummary.marketplaceSource
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(client.displayName)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
+
+                if let source {
+                    ClientSourceBadge(source: source)
+                }
 
                 if isMissingCompanyName {
                     Text("Needs details")
