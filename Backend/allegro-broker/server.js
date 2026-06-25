@@ -11,9 +11,13 @@ const clientID = requiredEnv("ALLEGRO_CLIENT_ID");
 const clientSecret = requiredEnv("ALLEGRO_CLIENT_SECRET");
 const environment = process.env.ALLEGRO_ENV === "sandbox" ? "sandbox" : "production";
 
-const allegroBaseURL = environment === "sandbox"
+const allegroAuthBaseURL = environment === "sandbox"
   ? "https://allegro.pl.allegrosandbox.pl"
   : "https://allegro.pl";
+
+const allegroAPIBaseURL = environment === "sandbox"
+  ? "https://api.allegro.pl.allegrosandbox.pl"
+  : "https://api.allegro.pl";
 
 const pendingStates = new Map();
 const connections = new Map();
@@ -37,7 +41,7 @@ app.get("/allegro/oauth/start", (request, response) => {
     appCallbackURL: callbackURL.toString()
   });
 
-  const authorizationURL = new URL("/auth/oauth/authorize", allegroBaseURL);
+  const authorizationURL = new URL("/auth/oauth/authorize", allegroAuthBaseURL);
   authorizationURL.searchParams.set("response_type", "code");
   authorizationURL.searchParams.set("client_id", clientID);
   authorizationURL.searchParams.set("redirect_uri", oauthCallbackURL());
@@ -161,7 +165,7 @@ async function exchangeAuthorizationCode(code) {
     redirect_uri: oauthCallbackURL()
   });
 
-  const response = await fetch(new URL("/auth/oauth/token", allegroBaseURL), {
+  const response = await fetch(new URL("/auth/oauth/token", allegroAuthBaseURL), {
     method: "POST",
     headers: {
       "Authorization": `Basic ${Buffer.from(`${clientID}:${clientSecret}`).toString("base64")}`,
@@ -185,7 +189,7 @@ async function exchangeAuthorizationCode(code) {
 }
 
 async function recentCheckoutForms(accessToken, limit) {
-  const eventsURL = new URL("/order/events", allegroBaseURL);
+  const eventsURL = new URL("/order/events", allegroAPIBaseURL);
   eventsURL.searchParams.set("limit", String(limit));
 
   const eventsResponse = await allegroRequest(eventsURL, accessToken);
@@ -194,7 +198,7 @@ async function recentCheckoutForms(accessToken, limit) {
   const orders = [];
   for (const checkoutFormID of checkoutFormIDs) {
     try {
-      const order = await allegroRequest(new URL(`/order/checkout-forms/${checkoutFormID}`, allegroBaseURL), accessToken);
+      const order = await allegroRequest(new URL(`/order/checkout-forms/${checkoutFormID}`, allegroAPIBaseURL), accessToken);
       orders.push(order);
     } catch (error) {
       console.error(`Could not fetch checkout form ${checkoutFormID}`, error);
