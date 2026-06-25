@@ -11,6 +11,8 @@ struct AllegroOrderImportSheet: View {
     @State private var selectedOrderIDs: Set<String> = []
     @State private var statusMessage: StatusMessage?
     @State private var isLoading = false
+    @State private var selectedRange: AllegroImportRange = .thirtyDays
+    @State private var responseMeta: AllegroBackendOrdersMeta?
 
     private var existingAllegroOrderIDs: Set<String> {
         Set(existingInvoices.compactMap { invoice in
@@ -34,6 +36,19 @@ struct AllegroOrderImportSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("Range", selection: $selectedRange) {
+                        ForEach(AllegroImportRange.allCases) { range in
+                            Text(range.title).tag(range)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Order History")
+                } footer: {
+                    Text("Fetches up to \(selectedRange.limit) Allegro orders from the selected period.")
+                }
+
                 if let statusMessage {
                     Section {
                         Label(statusMessage.text, systemImage: statusMessage.systemImage)
@@ -47,10 +62,13 @@ struct AllegroOrderImportSheet: View {
                     }
                 } else if !orders.isEmpty {
                     Section {
-                        LabeledContent("Fetched", value: "\(orders.count)")
+                        LabeledContent("Fetched", value: "\(responseMeta?.fetched ?? orders.count)")
                         LabeledContent("Ready to import", value: "\(importableOrders.count)")
                         if skippedOrderCount > 0 {
                             LabeledContent("Already imported", value: "\(skippedOrderCount)")
+                        }
+                        if responseMeta?.filterMode == "updatedAt" {
+                            LabeledContent("Matched by", value: "Updated date")
                         }
                     } header: {
                         Text("Summary")
@@ -62,7 +80,7 @@ struct AllegroOrderImportSheet: View {
                         ContentUnavailableView(
                             orders.isEmpty ? "No Allegro Orders" : "No New Orders",
                             systemImage: "cart.badge.questionmark",
-                            description: Text(orders.isEmpty ? "Connect Allegro and try again after receiving orders." : "All fetched Allegro orders already have invoice drafts.")
+                            description: Text(orders.isEmpty ? "Try a wider history range or import again after receiving orders." : "All fetched Allegro orders already have invoice drafts.")
                         )
                     }
                 } else if !isLoading {
@@ -104,17 +122,36 @@ struct AllegroOrderImportSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await reloadOrders() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Import", action: importSelectedOrders)
                         .disabled(selectedOrders.isEmpty)
                 }
             }
             .task { await loadOrders() }
+            .onChange(of: selectedRange) { _, _ in
+                Task { await reloadOrders() }
+            }
         }
     }
 
-    private func loadOrders() async {
-        guard orders.isEmpty else { return }
+    private func reloadOrders() async {
+        orders = []
+        selectedOrderIDs = []
+        responseMeta = nil
+        statusMessage = nil
+        await loadOrders(forceReload: true)
+    }
+
+    private func loadOrders(forceReload: Bool = false) async {
+        guard forceReload || orders.isEmpty else { return }
         guard let connection = AllegroBackendConnectionStore().load(),
               let client = AllegroBackendConnectionClient(brokerBaseURL: connection.brokerBaseURL) else {
             statusMessage = StatusMessage(text: "Connect Allegro before importing orders.", systemImage: "exclamationmark.triangle", color: .orange)
@@ -125,7 +162,9 @@ struct AllegroOrderImportSheet: View {
         defer { isLoading = false }
 
         do {
-            orders = try await client.orders(connectionID: connection.connectionID)
+            let result = try await client.orders(connectionID: connection.connectionID, days: selectedRange.days, limit: selectedRange.limit)
+            orders = result.orders
+            responseMeta = result.meta
             selectedOrderIDs = Set(importableOrders.map(\.id))
         } catch {
             statusMessage = StatusMessage(error: error)
@@ -168,5 +207,30 @@ struct AllegroOrderImportSheet: View {
             return ""
         }
         return total.amount.formatted(.currency(code: total.currency))
+    }
+}
+
+private enum AllegroImportRange: Int, CaseIterable, Identifiable {
+    case sevenDays = 7
+    case thirtyDays = 30
+    case ninetyDays = 90
+
+    var id: Int { rawValue }
+    var days: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .sevenDays: "7 days"
+        case .thirtyDays: "30 days"
+        case .ninetyDays: "90 days"
+        }
+    }
+
+    var limit: Int {
+        switch self {
+        case .sevenDays: 300
+        case .thirtyDays: 1000
+        case .ninetyDays: 1000
+        }
     }
 }

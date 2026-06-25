@@ -121,12 +121,16 @@ app.get("/allegro/connections/:connectionID/orders", async (request, response) =
     return;
   }
 
-  const limit = clampNumber(Number(request.query.limit || 25), 1, 100);
+  const limit = clampNumber(Number(request.query.limit || 500), 1, 1000);
+  const dateRange = orderDateRange(request.query);
 
   try {
     const token = await accessTokenForConnection(request.params.connectionID, connection);
-    const orders = await recentCheckoutForms(token.access_token, limit);
-    response.json({ orders });
+    const result = await checkoutFormsByDateRange(token.access_token, {
+      ...dateRange,
+      limit
+    });
+    response.json(result);
   } catch (error) {
     response.status(502).json({
       error: {
@@ -170,6 +174,27 @@ function clampNumber(value, min, max) {
     return min;
   }
   return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
+function orderDateRange(query) {
+  const now = new Date();
+  const to = parseDate(query.to) || now;
+  const days = clampNumber(Number(query.days || 30), 1, 365);
+  const from = parseDate(query.from) || new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+
+  return {
+    from: from.toISOString(),
+    to: to.toISOString()
+  };
+}
+
+function parseDate(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 async function exchangeAuthorizationCode(code) {
@@ -315,40 +340,82 @@ async function deleteConnection(connectionID) {
   await pool.query("DELETE FROM allegro_connections WHERE id = $1", [connectionID]);
 }
 
-async function recentCheckoutForms(accessToken, limit) {
-  const eventsURL = new URL("/order/events", allegroAPIBaseURL);
-  eventsURL.searchParams.set("limit", String(limit));
-
-  const eventsResponse = await allegroRequest(eventsURL, accessToken);
-  const checkoutFormIDs = uniqueCheckoutFormIDs(eventsResponse.events || []).slice(0, limit);
-
+async function checkoutFormsByDateRange(accessToken, options) {
+  const pageSize = 100;
+  const limit = clampNumber(Number(options.limit || 500), 1, 1000);
   const orders = [];
-  for (const checkoutFormID of checkoutFormIDs) {
-    try {
-      const order = await allegroRequest(new URL(`/order/checkout-forms/${checkoutFormID}`, allegroAPIBaseURL), accessToken);
-      orders.push(order);
-    } catch (error) {
-      console.error(`Could not fetch checkout form ${checkoutFormID}`, error);
+  let offset = 0;
+  let filterMode = "lineItems.boughtAt";
+
+  while (orders.length < limit) {
+    const requestLimit = Math.min(pageSize, limit - orders.length);
+    const page = await checkoutFormsPage(accessToken, {
+      from: options.from,
+      to: options.to,
+      limit: requestLimit,
+      offset,
+      filterMode
+    }).catch(async (error) => {
+      if (filterMode === "lineItems.boughtAt" && isUnsupportedFilterError(error)) {
+        filterMode = "updatedAt";
+        offset = 0;
+        orders.length = 0;
+        return checkoutFormsPage(accessToken, {
+          from: options.from,
+          to: options.to,
+          limit: requestLimit,
+          offset,
+          filterMode
+        });
+      }
+      throw error;
+    });
+
+    if (page.length === 0) {
+      break;
     }
+
+    orders.push(...page);
+    if (page.length < requestLimit) {
+      break;
+    }
+    offset += page.length;
   }
 
-  return orders;
+  return {
+    orders,
+    meta: {
+      from: options.from,
+      to: options.to,
+      limit,
+      fetched: orders.length,
+      filterMode
+    }
+  };
 }
 
-function uniqueCheckoutFormIDs(events) {
-  const ids = [];
-  const seen = new Set();
+async function checkoutFormsPage(accessToken, options) {
+  const checkoutFormsURL = new URL("/order/checkout-forms", allegroAPIBaseURL);
+  checkoutFormsURL.searchParams.set("limit", String(options.limit));
+  checkoutFormsURL.searchParams.set("offset", String(options.offset));
+  if (options.filterMode === "lineItems.boughtAt") {
+    checkoutFormsURL.searchParams.set("sort", "-lineItems.boughtAt");
+  }
+  checkoutFormsURL.searchParams.set(`${options.filterMode}.gte`, options.from);
+  checkoutFormsURL.searchParams.set(`${options.filterMode}.lte`, options.to);
 
-  for (const event of events) {
-    const checkoutFormID = event?.checkoutForm?.id || event?.order?.checkoutForm?.id;
-    if (typeof checkoutFormID !== "string" || checkoutFormID.length === 0 || seen.has(checkoutFormID)) {
-      continue;
-    }
-    seen.add(checkoutFormID);
-    ids.push(checkoutFormID);
+  const response = await allegroRequest(checkoutFormsURL, accessToken);
+  return Array.isArray(response.checkoutForms) ? response.checkoutForms : [];
+}
+
+function isUnsupportedFilterError(error) {
+  if (!(error instanceof Error)) {
+    return false;
   }
 
-  return ids;
+  return error.message.includes("400") ||
+    error.message.toLowerCase().includes("unsupported") ||
+    error.message.toLowerCase().includes("invalid");
 }
 
 async function allegroRequest(url, accessToken) {

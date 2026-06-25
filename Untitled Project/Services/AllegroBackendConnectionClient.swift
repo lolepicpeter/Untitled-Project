@@ -50,9 +50,12 @@ struct AllegroBackendConnectionClient {
         brokerBaseURL.appending(path: "allegro/oauth/start")
     }
 
-    func orders(connectionID: String, limit: Int = 25) async throws -> [AllegroCheckoutForm] {
+    func orders(connectionID: String, days: Int = 30, limit: Int = 500) async throws -> AllegroBackendOrdersResult {
         var components = URLComponents(url: brokerBaseURL.appending(path: "allegro/connections/\(connectionID)/orders"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 100))")]
+        components?.queryItems = [
+            URLQueryItem(name: "days", value: "\(min(max(days, 1), 365))"),
+            URLQueryItem(name: "limit", value: "\(min(max(limit, 1), 1000))")
+        ]
 
         guard let url = components?.url else {
             throw AllegroBackendConnectionError.invalidBrokerURL
@@ -69,7 +72,8 @@ struct AllegroBackendConnectionClient {
         }
 
         do {
-            return try JSONDecoder().decode(AllegroBackendOrdersResponse.self, from: data).orders
+            let response = try JSONDecoder().decode(AllegroBackendOrdersResponse.self, from: data)
+            return AllegroBackendOrdersResult(orders: response.orders, meta: response.meta)
         } catch {
             throw AllegroBackendConnectionError.decodingFailed(Self.describeDecodingError(error, data: data))
         }
@@ -96,8 +100,22 @@ struct AllegroBackendConnectionClient {
     }
 }
 
+struct AllegroBackendOrdersResult: Equatable {
+    var orders: [AllegroCheckoutForm]
+    var meta: AllegroBackendOrdersMeta?
+}
+
+struct AllegroBackendOrdersMeta: Decodable, Equatable {
+    var from: String?
+    var to: String?
+    var limit: Int?
+    var fetched: Int?
+    var filterMode: String?
+}
+
 private struct AllegroBackendOrdersResponse: Decodable {
     let orders: [AllegroCheckoutForm]
+    let meta: AllegroBackendOrdersMeta?
 }
 
 private struct AllegroBackendErrorResponse: Decodable {
